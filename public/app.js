@@ -215,6 +215,7 @@ const routes = {
 let lastSearch = null; // cache results between navigations
 
 async function render() {
+  $('#modal-root').innerHTML = ''; // close any open modal on navigation
   const hash = location.hash.replace(/^#\//, '') || 'dashboard';
   const [route, param] = hash.split('/');
   const view = routes[route] || viewDashboard;
