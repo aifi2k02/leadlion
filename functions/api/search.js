@@ -13,6 +13,7 @@ const FIELD_MASK = [
   'places.userRatingCount',
   'places.websiteUri',
   'places.nationalPhoneNumber',
+  'places.internationalPhoneNumber',
   'places.businessStatus',
   'places.photos',
   'places.regularOpeningHours',
@@ -79,6 +80,7 @@ function mapPlace(p) {
     reviewCount: p.userRatingCount || 0,
     website: p.websiteUri || null,
     phone: p.nationalPhoneNumber || null,
+    phoneIntl: p.internationalPhoneNumber || null,
     photoCount: (p.photos || []).length,
     hasHours: !!p.regularOpeningHours,
     // Places API doesn't expose claimed status; heuristic: no website, no

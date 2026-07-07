@@ -165,7 +165,36 @@ Close:
 Objection — "not interested":
 "Totally understand. Can I still send the free report? No strings — if nothing else you'll know what your competitors are doing better."`;
 
-  return { email, call };
+  // WhatsApp — short, warm, mobile-first. Two issues max, ends with a soft ask.
+  const wIssues = topIssues.slice(0, 2).map((i) => `• ${i.text}`).join('\n');
+  const greet = s.waGreeting || 'Hello';
+  const whatsapp = `${greet}! I came across ${lead.name} on Google while searching "${lead.keyword}" in ${lead.location}. 👋
+
+I did a quick check of your online presence and noticed a couple of things that may be sending customers to competitors:
+${wIssues}
+
+Both are quick to fix. I've prepared a *free* audit report for you — no cost, no obligation. Would it be okay if I share it?
+
+${agency}`;
+
+  return { email, call, whatsapp };
+}
+
+// Build a wa.me deep link. Prefers Google's international number; falls back to
+// national + a default country code from Settings. Empty number → WhatsApp
+// opens with the message pre-typed and the user picks the contact.
+function waNumber(lead) {
+  if (lead.phoneIntl) return lead.phoneIntl.replace(/\D/g, '');
+  let p = (lead.phone || '').replace(/\D/g, '');
+  if (!p) return '';
+  const cc = (getSettings().waCountryCode || '').replace(/\D/g, '');
+  if (p.startsWith('0')) p = p.slice(1);
+  return cc ? cc + p : ''; // without a country code we can't be sure — let user pick
+}
+
+function waLink(lead, message) {
+  const num = waNumber(lead);
+  return `https://wa.me/${num}?text=${encodeURIComponent(message)}`;
 }
 
 // ---------------------------------------------------------------- views
@@ -526,10 +555,10 @@ async function openLeadModal(lead) {
         <div class="flex mt spread">
           <div class="flex">
             ${isSaved
-              ? `<a class="btn" href="#/report/${encodeURIComponent(l.id)}">📄 Audit report</a>
-                 <button class="btn-ghost" id="outreach">✉️ Outreach scripts</button>`
-              : `<button id="save-lead">💾 Save lead</button>
-                 <button class="btn-ghost" id="outreach">✉️ Outreach scripts</button>`}
+              ? `<a class="btn" href="#/report/${encodeURIComponent(l.id)}">📄 Audit report</a>`
+              : `<button id="save-lead">💾 Save lead</button>`}
+            <button class="btn-wa" id="wa-quick">💬 WhatsApp</button>
+            <button class="btn-ghost" id="outreach">✉️ Scripts</button>
           </div>
           ${isSaved ? `<button class="btn-danger btn-sm" id="del-lead">Delete</button>` : ''}
         </div>
@@ -606,21 +635,44 @@ async function openLeadModal(lead) {
     $('#save-lead').onclick = async () => { await store.save(l); toast('Lead saved — audit report unlocked'); openLeadModal(l); };
   }
   $('#outreach').onclick = () => openOutreachModal(l);
+  $('#wa-quick').onclick = () => {
+    if (!isSaved) store.save(l); // saving is cheap; keeps a record of who you contacted
+    openWhatsApp(l);
+  };
+}
+
+// Open WhatsApp with the pre-filled message. Marks the lead 'contacted'.
+function openWhatsApp(lead) {
+  const { whatsapp } = buildOutreach(lead);
+  const num = waNumber(lead);
+  window.open(waLink(lead, whatsapp), '_blank');
+  if (!num) toast('Opened WhatsApp — pick the contact (no number on this listing)');
+  else toast('Opened WhatsApp with your message');
+  // best-effort: mark contacted if it's a saved lead
+  store.get(lead.placeId || lead.id).then((saved) => {
+    if (saved && saved.status === 'new') store.update(saved.id, { status: 'contacted' });
+  });
 }
 
 function openOutreachModal(lead) {
-  const { email, call } = buildOutreach(lead);
+  const { email, call, whatsapp } = buildOutreach(lead);
+  const num = waNumber(lead);
   $('#modal-root').innerHTML = `
     <div class="modal-overlay" id="overlay">
       <div class="modal">
         <button class="modal-close" id="close">✕</button>
         <h2>Outreach — ${esc(lead.name)}</h2>
         <p class="muted mb">Personalized from this business's actual audit findings.</p>
-        ${lead.webAudit?.emails?.length ? `<div class="banner banner-info">📧 Send to: <b>${lead.webAudit.emails.map(esc).join(', ')}</b> <span class="muted">(found on their website)</span></div>` : ''}
-        <div class="flex spread"><label>Cold email</label><button class="btn-ghost btn-sm" data-copy="email">Copy</button></div>
-        <textarea class="script" id="script-email" rows="12">${esc(email)}</textarea>
+
+        <div class="flex spread"><label>💬 WhatsApp message ${num ? `<span class="muted">→ ${esc(lead.phoneIntl || lead.phone || '')}</span>` : '<span class="muted">(no number — you’ll pick the contact)</span>'}</label><button class="btn-ghost btn-sm" data-copy="wa">Copy</button></div>
+        <textarea class="script" id="script-wa" rows="9">${esc(whatsapp)}</textarea>
+        <button class="btn-wa mt" id="wa-send" style="width:100%">💬 Open in WhatsApp with this message</button>
+
+        ${lead.webAudit?.emails?.length ? `<div class="banner banner-info mt">📧 Send email to: <b>${lead.webAudit.emails.map(esc).join(', ')}</b> <span class="muted">(found on their website)</span></div>` : ''}
+        <div class="flex spread mt"><label>Cold email</label><button class="btn-ghost btn-sm" data-copy="email">Copy</button></div>
+        <textarea class="script" id="script-email" rows="11">${esc(email)}</textarea>
         <div class="flex spread mt"><label>Phone script</label><button class="btn-ghost btn-sm" data-copy="call">Copy</button></div>
-        <textarea class="script" id="script-call" rows="12">${esc(call)}</textarea>
+        <textarea class="script" id="script-call" rows="11">${esc(call)}</textarea>
       </div>
     </div>`;
   $('#close').onclick = () => openLeadModal(lead);
@@ -631,6 +683,14 @@ function openOutreachModal(lead) {
       toast('Copied to clipboard');
     };
   });
+  // send whatever the user edited in the textarea
+  $('#wa-send').onclick = () => {
+    window.open(waLink(lead, $('#script-wa').value), '_blank');
+    toast(num ? 'Opened WhatsApp' : 'Opened WhatsApp — pick the contact');
+    store.get(lead.placeId || lead.id).then((saved) => {
+      if (saved && saved.status === 'new') store.update(saved.id, { status: 'contacted' });
+    });
+  };
 }
 
 // -------- my leads (pipeline)
@@ -770,6 +830,15 @@ async function viewSettings() {
     </div>
 
     <div class="card mb">
+      <h2 style="margin-top:0">💬 WhatsApp outreach</h2>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Greeting</label><input id="s-wagreet" value="${esc(s.waGreeting || '')}" placeholder="Hello / Assalam o Alaikum / Hi"></div>
+        <div><label>Default country code <span class="muted">(fallback only)</span></label><input id="s-wacc" value="${esc(s.waCountryCode || '')}" placeholder="92 for Pakistan, 1 for US"></div>
+      </div>
+      <p class="muted mt" style="font-size:12.5px">The greeting starts every WhatsApp message. The country code is only used as a fallback when Google doesn't provide an international number.</p>
+    </div>
+
+    <div class="card mb">
       <h2 style="margin-top:0">🔑 Google Places API key <span class="badge badge-muted">optional</span></h2>
       <p class="muted" style="font-size:13.5px">Without a key you get demo data. Get a free key at <code class="inline">console.cloud.google.com</code> → enable <b>Places API (New)</b> → thousands of free searches/month. For production, set it as a Cloudflare Pages secret <code class="inline">GOOGLE_PLACES_API_KEY</code> instead so it never touches the browser.</p>
       <label>API key</label><input id="s-gkey" type="password" value="${esc(s.googleApiKey || '')}" placeholder="AIza…">
@@ -796,6 +865,8 @@ async function viewSettings() {
       agencyEmail: $('#s-email').value.trim(),
       agencyPhone: $('#s-phone').value.trim(),
       agencyWebsite: $('#s-web').value.trim(),
+      waGreeting: $('#s-wagreet').value.trim(),
+      waCountryCode: $('#s-wacc').value.trim(),
       googleApiKey: $('#s-gkey').value.trim(),
       supabaseUrl: $('#s-surl').value.trim(),
       supabaseKey: $('#s-skey').value.trim(),
