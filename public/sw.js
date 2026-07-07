@@ -1,7 +1,7 @@
 // LeadLion service worker — caches the app shell for instant loads / offline.
 // Network-first for HTML/API so data stays fresh; cache-first for static assets.
 
-const CACHE = 'leadlion-v11';
+const CACHE = 'leadlion-v12';
 const SHELL = ['/app', '/app.html', '/app.js', '/styles.css', '/logo.png', '/manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
@@ -19,8 +19,15 @@ self.addEventListener('fetch', (e) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
 
-  // Never cache API calls or hosted report pages — always live.
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/r/')) return;
+  // Never touch API calls, hosted reports, admin, or other top-level pages —
+  // let them always hit the network so they're never served a stale/app shell.
+  if (
+    url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/r/') ||
+    url.pathname === '/admin' || url.pathname === '/admin.html' ||
+    url.pathname === '/privacy' || url.pathname === '/terms' ||
+    url.pathname === '/' || url.pathname === '/index.html'
+  ) return;
 
   // Static assets: cache-first.
   if (['/app.js', '/styles.css', '/logo.png', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'].includes(url.pathname)) {
@@ -32,8 +39,8 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // App HTML: network-first, fall back to cached shell offline.
-  if (request.mode === 'navigate') {
+  // App HTML only: network-first, fall back to cached shell offline.
+  if (request.mode === 'navigate' && url.pathname.startsWith('/app')) {
     e.respondWith(fetch(request).catch(() => caches.match('/app.html')));
   }
 });
