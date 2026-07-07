@@ -737,6 +737,7 @@ async function viewReport(id) {
       <a class="btn-ghost btn-sm" href="#/leads">← Back</a>
       <button onclick="window.print()">🖨️ Print / Save as PDF</button>
     </div>
+    <div class="card mb no-print" id="share-panel"><p class="muted">Loading share options…</p></div>
     <div class="report-page">
       <div class="report-head">
         <div class="report-agency">${esc(s.agencyName || 'Your Agency Name')}<div class="sub">${esc(s.agencyTagline || 'Local Marketing Specialists')}</div></div>
@@ -809,6 +810,104 @@ async function viewReport(id) {
       </div>
     </div>
   `;
+  renderSharePanel(lead);
+}
+
+// Snapshot the lead into a compact, self-contained report payload (+ agency branding).
+function buildReportPayload(lead) {
+  const s = getSettings();
+  return {
+    name: lead.name, address: lead.address, keyword: lead.keyword, location: lead.location,
+    healthScore: lead.healthScore, opportunityScore: lead.opportunityScore, grade: lead.grade,
+    rating: lead.rating, reviewCount: lead.reviewCount, website: lead.website, phone: lead.phone,
+    photoCount: lead.photoCount, hasHours: lead.hasHours,
+    findings: lead.findings, services: lead.services,
+    webAudit: lead.webAudit || null, pageSpeed: lead.pageSpeed || null,
+    createdAt: new Date().toISOString(),
+    agency: { name: s.agencyName || '', tagline: s.agencyTagline || '', email: s.agencyEmail || '', phone: s.agencyPhone || '', website: s.agencyWebsite || '' },
+  };
+}
+
+function relTime(iso) {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.round(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
+async function renderSharePanel(lead) {
+  const panel = $('#share-panel');
+  if (!panel) return;
+  const url = lead.reportUrl;
+
+  if (!url) {
+    panel.innerHTML = `
+      <div class="flex spread">
+        <div><b>🌐 Share this report</b><div class="muted" style="font-size:13px">Publish a live link you can send on WhatsApp — you'll see when they open it.</div></div>
+        <button id="publish-report">Publish shareable link</button>
+      </div>`;
+    $('#publish-report').onclick = () => publishReport(lead);
+    return;
+  }
+
+  // published — show link, share buttons, live stats
+  panel.innerHTML = `
+    <div class="flex spread mb"><b>🌐 Shared report</b> <span class="muted" id="views-stat" style="font-size:13px">checking opens…</span></div>
+    <div class="flex" style="gap:8px">
+      <input id="report-url" value="${esc(url)}" readonly style="flex:1">
+      <button class="btn-sm" id="copy-url">Copy</button>
+      <button class="btn-wa btn-sm" id="wa-report">💬 Send</button>
+      <a class="btn-ghost btn-sm" href="${esc(url)}?p=1" target="_blank">Preview</a>
+      <button class="btn-ghost btn-sm" id="republish">Re-publish</button>
+    </div>`;
+  $('#copy-url').onclick = () => { navigator.clipboard.writeText(url); toast('Link copied'); };
+  $('#republish').onclick = () => publishReport(lead);
+  $('#wa-report').onclick = () => {
+    const s = getSettings();
+    const msg = `${s.waGreeting || 'Hello'}! I put together a quick audit of ${lead.name}'s Google listing — here's your free report:\n${url}`;
+    window.open(waLink(lead, msg), '_blank');
+    store.get(lead.id).then((sv) => { if (sv && sv.status === 'new') store.update(sv.id, { status: 'contacted' }); });
+  };
+  loadViewStats(lead.reportId);
+}
+
+async function loadViewStats(id) {
+  if (!id) return;
+  try {
+    const res = await fetch(`/api/report?id=${encodeURIComponent(id)}`);
+    const v = await res.json();
+    const el = $('#views-stat');
+    if (!el) return;
+    el.innerHTML = v.views > 0
+      ? `<span class="badge badge-green">👁 Opened ${v.views}×</span> last ${relTime(v.last)}`
+      : `<span class="badge badge-muted">not opened yet</span>`;
+  } catch { /* ignore */ }
+}
+
+async function publishReport(lead) {
+  const btn = $('#publish-report') || $('#republish');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
+  try {
+    const res = await fetch('/api/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ report: buildReportPayload(lead), id: lead.reportId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Publish failed');
+    lead.reportId = data.id;
+    lead.reportUrl = data.url;
+    await store.update(lead.id, { reportId: data.id, reportUrl: data.url });
+    toast('Report published — link ready to share');
+    renderSharePanel(lead);
+  } catch (e) {
+    toast(e.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Publish shareable link'; }
+  }
 }
 
 // -------- settings
