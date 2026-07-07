@@ -28,33 +28,27 @@
            C25 42.6 19.6 36.8 19.6 29.2
            C19.6 22.2 24.8 17.2 32 17.2 Z" fill="url(#face)"/>
 
-  <!-- brows (confident, low) -->
-  <path d="M24.2 25.6 Q27.0 23.6 30.2 25.0" stroke="#451a03" stroke-width="2.1" fill="none" stroke-linecap="round"/>
-  <path d="M39.8 25.6 Q37.0 23.6 33.8 25.0" stroke="#451a03" stroke-width="2.1" fill="none" stroke-linecap="round"/>
+  <!-- soft muzzle (single, low-contrast — no clown cheeks) -->
+  <ellipse cx="32" cy="37.2" rx="6.6" ry="4.8" fill="#fffbeb" opacity="0.55"/>
 
-  <!-- eyes (almond, slight tilt) -->
-  <g fill="#292018">
-    <ellipse cx="27.1" cy="28.7" rx="2.4" ry="2.6" transform="rotate(-8 27.1 28.7)"/>
-    <ellipse cx="36.9" cy="28.7" rx="2.4" ry="2.6" transform="rotate(8 36.9 28.7)"/>
+  <!-- eyes (calm almond) -->
+  <g fill="#3b2a17">
+    <ellipse cx="27.4" cy="28.6" rx="2.2" ry="2.5"/>
+    <ellipse cx="36.6" cy="28.6" rx="2.2" ry="2.5"/>
   </g>
-  <circle cx="27.8" cy="27.9" r="0.6" fill="#fff"/>
-  <circle cx="37.6" cy="27.9" r="0.6" fill="#fff"/>
+  <circle cx="28.0" cy="27.9" r="0.55" fill="#fff"/>
+  <circle cx="37.2" cy="27.9" r="0.55" fill="#fff"/>
 
-  <!-- muzzle cheeks -->
-  <circle cx="28.5" cy="37.0" r="3.8" fill="#fffbeb"/>
-  <circle cx="35.5" cy="37.0" r="3.8" fill="#fffbeb"/>
+  <!-- brow ridge shading (subtle fur, not comic arches) -->
+  <path d="M24.8 25.3 Q27.4 24.6 30 25.2" stroke="#c98a3c" stroke-width="1.3" fill="none" stroke-linecap="round" opacity="0.7"/>
+  <path d="M39.2 25.3 Q36.6 24.6 34 25.2" stroke="#c98a3c" stroke-width="1.3" fill="none" stroke-linecap="round" opacity="0.7"/>
 
-  <!-- nose = subtle map pin (local-leads nod) -->
-  <path d="M32 31.0 C29.9 31.0 28.5 32.3 28.5 34.0 C28.5 36.2 32 39.2 32 39.2 C32 39.2 35.5 36.2 35.5 34.0 C35.5 32.3 34.1 31.0 32 31.0 Z" fill="#9a3412"/>
-  <circle cx="32" cy="33.8" r="1.1" fill="#fef3c7"/>
+  <!-- nose: dark lion muzzle, shaped as a map pin (subtle local-leads nod) -->
+  <path d="M32 31.4 C30.4 31.4 29.3 32.4 29.3 33.7 C29.3 35.4 32 37.9 32 37.9 C32 37.9 34.7 35.4 34.7 33.7 C34.7 32.4 33.6 31.4 32 31.4 Z" fill="#3b2410"/>
+  <ellipse cx="32" cy="33.5" rx="1.5" ry="1.1" fill="#1f1409"/>
 
-  <!-- mouth -->
-  <path d="M32 39.2 Q29.6 41.4 27.4 40.3" stroke="#78350f" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-  <path d="M32 39.2 Q34.4 41.4 36.6 40.3" stroke="#78350f" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-
-  <!-- whisker dots -->
-  <g fill="#d97706" opacity="0.85">
-    <circle cx="26.6" cy="36.2" r="0.6"/><circle cx="25.9" cy="38.0" r="0.6"/>
-    <circle cx="37.4" cy="36.2" r="0.6"/><circle cx="38.1" cy="38.0" r="0.6"/>
-  </g>
+  <!-- mouth (natural lion muzzle line) -->
+  <path d="M32 37.9 L32 39.3" stroke="#6b4423" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+  <path d="M32 39.3 Q29.9 40.7 28.2 39.9" stroke="#6b4423" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+  <path d="M32 39.3 Q34.1 40.7 35.8 39.9" stroke="#6b4423" stroke-width="1.2" fill="none" stroke-linecap="round"/>
 </svg>
