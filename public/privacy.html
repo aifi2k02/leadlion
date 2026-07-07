@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — LeadLion</title>
+  <meta name="description" content="How LeadLion collects, uses, and protects your data.">
+  <link rel="icon" href="/logo.png">
+  <meta name="theme-color" content="#0e1116">
+  <style>
+    :root{--bg:#0e1116;--panel:#161b23;--card:#1c2330;--border:#2a3446;--text:#e8edf5;--dim:#94a3b8;--accent:#f5a623;--accent2:#d97706}
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.7;-webkit-font-smoothing:antialiased}
+    a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+    .wrap{max-width:820px;margin:0 auto;padding:0 22px}
+    nav{position:sticky;top:0;z-index:50;background:rgba(14,17,22,.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--border)}
+    nav .wrap{display:flex;align-items:center;justify-content:space-between;height:72px;max-width:1140px}
+    .logo{display:flex;align-items:center;gap:10px;font-size:21px;font-weight:700;letter-spacing:-.4px;color:var(--text)}
+    .logo img{border-radius:9px}.logo b{color:var(--accent)}
+    .btn{display:inline-block;background:var(--accent);color:#1a1205;font-weight:700;padding:11px 22px;border-radius:10px}
+    .doc{padding:56px 0 80px}
+    .doc h1{font-size:34px;letter-spacing:-1px;margin-bottom:6px}
+    .doc .updated{color:var(--dim);font-size:14px;margin-bottom:34px}
+    .doc h2{font-size:20px;margin:34px 0 12px;letter-spacing:-.3px}
+    .doc p,.doc li{color:#cbd5e1;margin-bottom:12px}
+    .doc ul{padding-left:22px;margin-bottom:12px}
+    .doc li{margin-bottom:7px}
+    .doc strong{color:var(--text)}
+    .box{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px 22px;margin:18px 0}
+    footer{border-top:1px solid var(--border);padding:30px 0;color:var(--dim);font-size:13.5px}
+    footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:14px;max-width:1140px}
+    footer a{color:var(--dim);margin-left:16px}
+  </style>
+</head>
+<body>
+  <nav><div class="wrap">
+    <a class="logo" href="/"><img src="/logo.png" width="40" height="40" alt=""><span>Lead<b>Lion</b></span></a>
+    <a class="btn" href="/app">Launch App →</a>
+  </div></nav>
+
+  <main class="doc"><div class="wrap">
+    <h1>Privacy Policy</h1>
+    <div class="updated">Last updated: 7 July 2026</div>
+
+    <p>This Privacy Policy explains how <strong>LeadLion</strong> ("we", "us", "the Service") handles information when you use our web application at leadlion.pages.dev. We built LeadLion to be privacy-respecting by design: most of your working data never leaves your own browser.</p>
+
+    <div class="box"><strong>The short version:</strong> We don't run user accounts, we don't sell your data, and your saved leads live in your own browser (or your own Supabase project) — not on our servers. Questions? Email <a href="mailto:aifi2k02@gmail.com">aifi2k02@gmail.com</a>.</div>
+
+    <h2>1. Information We Collect</h2>
+    <ul>
+      <li><strong>Search inputs</strong> — the keyword and location you enter are sent to the Google Places API to return matching businesses. We do not store these on our servers.</li>
+      <li><strong>Business data</strong> — publicly available information about local businesses (name, address, phone, rating, reviews, website, photos count, opening hours) retrieved from Google. This is public listing data, not personal data you provide.</li>
+      <li><strong>Agency branding</strong> — any name, tagline, email, phone, website, greeting, or country code you enter in Settings. This is stored only in your browser (and, if you connect it, your own Supabase project).</li>
+      <li><strong>Saved leads &amp; notes</strong> — leads you save, their pipeline status, and notes you write. Stored in your browser's local storage by default, or your own Supabase database if you configure it.</li>
+      <li><strong>Published report data</strong> — if you choose to publish a shareable audit report, the report contents (business audit + your branding snapshot) are stored in Cloudflare KV so the link works, along with anonymous view counts and timestamps.</li>
+      <li><strong>API keys</strong> — if you enter a Google or Supabase key in Settings, it is stored only in your browser. For production we recommend server-side secrets instead.</li>
+    </ul>
+    <p>We do <strong>not</strong> require you to create an account, and we do not collect names, passwords, or payment information.</p>
+
+    <h2>2. How We Use Information</h2>
+    <ul>
+      <li>To return business search results and generate audit scores, reports, and outreach messages.</li>
+      <li>To display and persist your saved leads and pipeline within your browser or your connected database.</li>
+      <li>To power shareable report links and show you when a published report has been opened.</li>
+    </ul>
+    <p>We do not use your data for advertising, and we do not sell or rent any data to third parties.</p>
+
+    <h2>3. Third-Party Services</h2>
+    <p>LeadLion relies on the following services to function. Your use of the Service is also subject to their policies:</p>
+    <ul>
+      <li><strong>Google Places API &amp; PageSpeed Insights</strong> — to fetch business listings and website performance data (<a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google Privacy Policy</a>).</li>
+      <li><strong>Cloudflare Pages &amp; KV</strong> — hosting, serverless functions, and storage for published reports (<a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare Privacy Policy</a>).</li>
+      <li><strong>Supabase</strong> — optional database sync, only if you connect your own project (<a href="https://supabase.com/privacy" target="_blank" rel="noopener">Supabase Privacy Policy</a>).</li>
+      <li><strong>WhatsApp</strong> — outreach links open WhatsApp on your device; we do not send messages on your behalf or receive their contents.</li>
+    </ul>
+
+    <h2>4. Data Storage &amp; Retention</h2>
+    <p>Your leads, settings, and branding remain in your browser's local storage until you clear your browser data or delete them in the app. If you connect Supabase, that data lives in your own database under your control. Published reports remain in Cloudflare KV until removed. You can stop using published links at any time.</p>
+
+    <h2>5. Cookies &amp; Local Storage</h2>
+    <p>We do not use advertising or tracking cookies. We use your browser's local storage solely to remember your settings and saved leads on your device. A service worker may cache the app files so it loads quickly and works offline.</p>
+
+    <h2>6. Public Business Information</h2>
+    <p>The business listings shown in LeadLion are publicly available via Google. LeadLion is a tool for legitimate B2B prospecting by marketing professionals. You are responsible for how you use this information (see our <a href="/terms">Terms of Use</a>).</p>
+
+    <h2>7. Security</h2>
+    <p>We use HTTPS everywhere and keep sensitive keys as server-side secrets where possible. However, no method of transmission or storage is 100% secure, and data you keep in your own browser is subject to the security of your device.</p>
+
+    <h2>8. Children</h2>
+    <p>LeadLion is a business tool not directed to anyone under 18. We do not knowingly collect data from children.</p>
+
+    <h2>9. Changes to This Policy</h2>
+    <p>We may update this policy from time to time. Material changes will be reflected by the "Last updated" date above.</p>
+
+    <h2>10. Contact</h2>
+    <p>For any privacy questions or data requests, contact us at <a href="mailto:aifi2k02@gmail.com">aifi2k02@gmail.com</a>.</p>
+  </div></main>
+
+  <footer><div class="wrap">
+    <div class="logo" style="font-size:16px"><img src="/logo.png" width="26" height="26" alt=""><span>Lead<b>Lion</b></span></div>
+    <div>© 2026 LeadLion <a href="/">Home</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></div>
+  </div></footer>
+</body>
+</html>
