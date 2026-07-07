@@ -645,9 +645,10 @@ async function openLeadModal(lead) {
         ${l.website ? webAuditBlock(l) : ''}
         ${competitorBlock(l)}
         ${isSaved ? `
-          <label>Pipeline status</label>
+          <label>Pipeline status <span id="status-fb" class="save-fb"></span></label>
           <select id="lead-status">${STATUSES.map((st) => `<option value="${st}" ${l.status === st ? 'selected' : ''}>${STATUS_LABEL[st]}</option>`).join('')}</select>
-          <label>Notes</label>
+          <div class="muted" style="font-size:12px;margin-top:4px">Changes save automatically.</div>
+          <label>Notes <span id="notes-fb" class="save-fb"></span></label>
           <textarea id="lead-notes" rows="3" placeholder="Call outcomes, contact name, next steps…">${esc(l.notes || '')}</textarea>` : ''}
         <div class="flex mt spread">
           <div class="flex">
@@ -725,8 +726,23 @@ async function openLeadModal(lead) {
   }
 
   if (isSaved) {
-    $('#lead-status').onchange = async (e) => { await store.update(l.id, { status: e.target.value }); toast('Status updated'); };
-    $('#lead-notes').onblur = async (e) => { await store.update(l.id, { notes: e.target.value }); };
+    $('#lead-status').onchange = async (e) => {
+      l.status = e.target.value;
+      await store.update(l.id, { status: e.target.value });
+      const fb = $('#status-fb');
+      fb.textContent = `✓ Moved to ${STATUS_LABEL[e.target.value]}`;
+      fb.classList.add('show');
+      toast(`Moved to ${STATUS_LABEL[e.target.value]}`);
+      setTimeout(() => fb.classList.remove('show'), 2500);
+    };
+    $('#lead-notes').onblur = async (e) => {
+      l.notes = e.target.value;
+      await store.update(l.id, { notes: e.target.value });
+      const fb = $('#notes-fb');
+      fb.textContent = '✓ Saved';
+      fb.classList.add('show');
+      setTimeout(() => fb.classList.remove('show'), 2000);
+    };
     $('#del-lead').onclick = async () => { await store.remove(l.id); toast('Lead deleted'); close(); render(); };
   } else {
     $('#save-lead').onclick = async () => { await store.save(l); toast('Lead saved — audit report unlocked'); openLeadModal(l); };
