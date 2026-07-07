@@ -89,7 +89,7 @@
       const { ok, d } = await api({ action: 'list' });
       if (!ok) { $('#ll-auth-err').textContent = d.error || 'Login failed'; return; }
       $('#ll-admin-auth').style.display = 'none';
-      $('#ll-admin-panel').style.display = '';
+      $('#ll-admin-panel').style.display = 'block';
       render(d.accounts);
     };
     $('#pw').onkeydown = (e) => { if (e.key === 'Enter') $('#ll-auth-btn').click(); };
