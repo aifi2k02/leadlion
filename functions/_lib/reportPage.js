@@ -111,6 +111,16 @@ export function renderReportPage(d) {
       ${!ps.finding.ok ? `<div style="margin-top:10px">${findingRow(ps.finding)}</div>` : ''}
     </div>` : ''}
 
+    ${d.competitors && d.competitors.marketSize ? `<div class="section"><h2>📊 Competitor Benchmark</h2>
+      <p style="color:#4a5568;font-size:14px">Ranked <b>#${d.competitors.rankByReviews}</b> of ${d.competitors.marketSize} by review volume for "${esc(d.keyword || '')}" in ${esc(d.location || '')}. Compared to the top ${d.competitors.topN} competitors:</p>
+      <div class="meta" style="margin-top:10px">
+        <span class="k">Reviews</span><span>${d.reviewCount ?? 0} <span style="color:#718096">vs ${d.competitors.avgReviews} avg${(d.reviewCount || 0) < d.competitors.avgReviews ? ` (${d.competitors.avgReviews - (d.reviewCount || 0)} behind)` : ''}</span></span>
+        <span class="k">Rating</span><span>${d.rating || 0}★ <span style="color:#718096">vs ${d.competitors.avgRating}★ avg</span></span>
+        <span class="k">Photos</span><span>${d.photoCount ?? 0} <span style="color:#718096">vs ${d.competitors.avgPhotos} avg</span></span>
+        <span class="k">Website</span><span>${d.website ? 'Yes' : 'No'} <span style="color:#718096">· ${d.competitors.pctWebsite}% of top ${d.competitors.topN} have one</span></span>
+      </div>
+    </div>` : ''}
+
     <div class="cta">
       <h3>Recommended next steps</h3>
       <p style="font-size:14px;color:#4a5568">${esc(d.name)} is leaving customers on the table. Priority: <b>${esc(services)}</b>. ${esc(a.name || 'We')} can typically resolve the critical issues above within 2–4 weeks.</p>

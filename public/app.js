@@ -133,13 +133,18 @@ function buildOutreach(lead) {
   const bullets = topIssues.map((i) => `  • ${i.text}`).join('\n');
   const services = [...new Set([...(lead.services || []), ...(lead.webAudit?.issues || []).map((i) => i.service)])].filter(Boolean).join(', ') || 'local SEO';
 
+  const c = lead.competitors;
+  const compLine = c && c.marketSize && (lead.reviewCount || 0) < c.avgReviews
+    ? `\n\nFor context: you're currently ranked #${c.rankByReviews} of ${c.marketSize} for "${lead.keyword}" in your area — the top ${c.topN} businesses average ${c.avgReviews} reviews, while you have ${lead.reviewCount || 0}. That gap is closable.`
+    : '';
+
   const email = `Subject: Quick question about ${lead.name}'s Google listing
 
 Hi there,
 
 I was searching for "${lead.keyword}" in ${lead.location} and came across ${lead.name}. I ran a quick audit of your Google Business Profile and noticed a few things that are likely costing you customers:
 
-${bullets}
+${bullets}${compLine}
 
 These are all fixable — most within a couple of weeks. I put together a free, no-obligation audit report that shows exactly where you stand against competitors nearby.
 
@@ -288,6 +293,7 @@ async function runSearch() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Search failed');
+    attachCompetitorStats(data.results);
     lastSearch = { keyword, location, mode: data.mode, deep: data.deep, cells: data.cells, results: data.results, filters: {} };
     renderResults(lastSearch);
   } catch (e) {
@@ -296,6 +302,27 @@ async function runSearch() {
     btn.disabled = false;
     btn.textContent = 'Search';
   }
+}
+
+// Benchmark every result against its market: rank by review volume + averages
+// of the top competitors. Attached to each result so saved leads keep it.
+function attachCompetitorStats(results) {
+  const n = results.length;
+  if (!n) return;
+  const byReviews = [...results].sort((a, b) => (b.reviewCount || 0) - (a.reviewCount || 0));
+  const rank = new Map(byReviews.map((r, i) => [r.placeId, i + 1]));
+  const topN = Math.min(5, n);
+  const top = byReviews.slice(0, topN);
+  const avg = (f) => Math.round(top.reduce((s, x) => s + (f(x) || 0), 0) / topN);
+  const bench = {
+    marketSize: n,
+    topN,
+    avgReviews: avg((x) => x.reviewCount),
+    avgRating: Math.round((top.reduce((s, x) => s + (x.rating || 0), 0) / topN) * 10) / 10,
+    avgPhotos: avg((x) => x.photoCount),
+    pctWebsite: Math.round((top.filter((x) => x.website).length / topN) * 100),
+  };
+  for (const r of results) r.competitors = { ...bench, rankByReviews: rank.get(r.placeId) };
 }
 
 // Combined opportunity = GMB opportunity + a headroom-scaled boost from a weak
@@ -520,6 +547,27 @@ function pageSpeedBlock(l) {
     ${!p.finding.ok ? `<div class="finding"><span class="icon">${p.finding.severity === 'critical' ? '🔴' : '🟡'}</span><div><div>${esc(p.finding.text)}</div><div class="pitch">💰 ${esc(p.finding.pitch)}</div></div></div>` : `<div class="finding"><span class="icon">✅</span><div>${esc(p.finding.text)}</div></div>`}`;
 }
 
+// -------- competitor benchmark block (inside lead modal + report)
+function competitorBlock(l) {
+  const c = l.competitors;
+  if (!c || !c.marketSize) return '';
+  const cmp = (label, you, avg, higherIsBetter = true) => {
+    const behind = higherIsBetter ? (you || 0) < avg : (you || 0) > avg;
+    return `<div class="finding"><span class="icon">${behind ? '🔴' : '✅'}</span>
+      <div class="flex spread" style="flex:1"><span>${label}</span>
+      <span><b>${you ?? 0}</b> <span class="muted">vs ${avg} avg${behind ? ` · ${Math.abs(avg - (you || 0))} behind` : ''}</span></span></div></div>`;
+  };
+  return `
+    <h2 style="font-size:15px">Competitor benchmark</h2>
+    <p class="muted" style="font-size:13px">Ranked <b style="color:var(--accent)">#${c.rankByReviews}</b> of ${c.marketSize} by review volume for "${esc(l.keyword)}" in ${esc(l.location)} — vs the top ${c.topN} competitors:</p>
+    <div class="mb">
+      ${cmp('Reviews', l.reviewCount, c.avgReviews)}
+      ${cmp('Rating', l.rating, c.avgRating)}
+      ${cmp('Photos', l.photoCount, c.avgPhotos)}
+      <div class="finding"><span class="icon">${l.website ? '✅' : '🔴'}</span><div class="flex spread" style="flex:1"><span>Website</span><span><b>${l.website ? 'Yes' : 'No'}</b> <span class="muted">· ${c.pctWebsite}% of top ${c.topN} have one</span></span></div></div>
+    </div>`;
+}
+
 // -------- lead modal
 async function openLeadModal(lead) {
   const savedLead = await store.get(lead.placeId || lead.id);
@@ -547,6 +595,7 @@ async function openLeadModal(lead) {
             </div>`).join('')}
         </div>
         ${l.website ? webAuditBlock(l) : ''}
+        ${competitorBlock(l)}
         ${isSaved ? `
           <label>Pipeline status</label>
           <select id="lead-status">${STATUSES.map((st) => `<option value="${st}" ${l.status === st ? 'selected' : ''}>${STATUS_LABEL[st]}</option>`).join('')}</select>
@@ -803,6 +852,18 @@ async function viewReport(id) {
         ${!lead.pageSpeed.finding.ok ? `<div class="report-finding" style="margin-top:10px"><span>${lead.pageSpeed.finding.severity === 'critical' ? '🔴' : '🟡'}</span><div><b>${esc(lead.pageSpeed.finding.text)}</b><div class="pitch">${esc(lead.pageSpeed.finding.pitch)}</div></div></div>` : ''}
       </div>` : ''}
 
+      ${lead.competitors?.marketSize ? `
+      <div class="report-section">
+        <h2>📊 Competitor Benchmark</h2>
+        <p style="color:#4a5568;font-size:14px">Ranked <b>#${lead.competitors.rankByReviews}</b> of ${lead.competitors.marketSize} by review volume for "${esc(lead.keyword)}" in ${esc(lead.location)}. Here's how you compare to the top ${lead.competitors.topN} competitors:</p>
+        <div class="report-meta-grid" style="margin-top:10px">
+          <span class="k">Reviews</span><span>${lead.reviewCount ?? 0} <span style="color:#718096">vs ${lead.competitors.avgReviews} avg${(lead.reviewCount || 0) < lead.competitors.avgReviews ? ` (${lead.competitors.avgReviews - (lead.reviewCount || 0)} behind)` : ''}</span></span>
+          <span class="k">Rating</span><span>${lead.rating || 0}★ <span style="color:#718096">vs ${lead.competitors.avgRating}★ avg</span></span>
+          <span class="k">Photos</span><span>${lead.photoCount ?? 0} <span style="color:#718096">vs ${lead.competitors.avgPhotos} avg</span></span>
+          <span class="k">Website</span><span>${lead.website ? 'Yes' : 'No'} <span style="color:#718096">· ${lead.competitors.pctWebsite}% of top ${lead.competitors.topN} have one</span></span>
+        </div>
+      </div>` : ''}
+
       <div class="report-cta">
         <h3>Recommended next steps</h3>
         <p style="font-size:14px;color:#4a5568">${esc(lead.name)} is currently leaving customers on the table. Our recommended priority: <b>${esc([...new Set([...(lead.services || []), ...(lead.webAudit?.issues || []).map((i) => i.service)])].filter(Boolean).join(' → ') || 'GMB optimization')}</b>. ${esc(s.agencyName || 'We')} can typically resolve the critical issues above within 2–4 weeks.</p>
@@ -823,6 +884,7 @@ function buildReportPayload(lead) {
     photoCount: lead.photoCount, hasHours: lead.hasHours,
     findings: lead.findings, services: lead.services,
     webAudit: lead.webAudit || null, pageSpeed: lead.pageSpeed || null,
+    competitors: lead.competitors || null,
     createdAt: new Date().toISOString(),
     agency: { name: s.agencyName || '', tagline: s.agencyTagline || '', email: s.agencyEmail || '', phone: s.agencyPhone || '', website: s.agencyWebsite || '' },
   };
