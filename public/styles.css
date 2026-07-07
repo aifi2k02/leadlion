@@ -273,6 +273,16 @@ td .sub { color: var(--text-dim); font-size: 12.5px; }
 .save-fb { color: var(--green); font-size: 12px; font-weight: 600; opacity: 0; transition: opacity 0.2s; margin-left: 6px; }
 .save-fb.show { opacity: 1; }
 
+/* selection + bulk delete */
+.sel-box, .sel-all { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.bulk-bar { display: flex; align-items: center; gap: 12px; background: var(--bg-card); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; }
+.bulk-bar #bulk-count { font-weight: 600; font-size: 14px; margin-right: auto; }
+
+/* segmented toggle */
+.seg { display: inline-flex; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg-btn { background: transparent; color: var(--text-dim); border: none; padding: 6px 13px; font-size: 13px; font-weight: 600; cursor: pointer; border-radius: 0; }
+.seg-btn.on { background: var(--bg-hover); color: var(--accent); }
+
 .muted { color: var(--text-dim); }
 .mt { margin-top: 14px; }
 .mb { margin-bottom: 14px; }

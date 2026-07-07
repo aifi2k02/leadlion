@@ -294,9 +294,11 @@ async function viewDashboard() {
         ${activityChart(leads)}
       </div>
       <h2>Recent leads</h2>
-      <div class="table-wrap">${leadsTable(recent)}</div>`}
+      ${bulkBarHtml()}
+      <div class="table-wrap">${leadsTable(recent, { selectable: true })}</div>`}
   `;
   bindLeadRows(recent);
+  wireSelection(render);
 }
 
 // -------- find leads
@@ -484,11 +486,13 @@ function leadsTable(rows, opts = {}) {
   if (!rows.length) return '<div class="card muted">Nothing here yet.</div>';
   return `<table>
     <thead><tr>
+      ${opts.selectable ? '<th style="width:30px"><input type="checkbox" class="sel-all" title="Select all"></th>' : ''}
       <th>Opportunity</th><th>Business</th><th>Rating</th><th>Reviews</th><th>Website</th><th>Grade</th>${opts.saveBtn ? '<th></th>' : '<th>Status</th>'}
     </tr></thead>
     <tbody>
       ${rows.map((r, i) => `
         <tr class="row-click" data-i="${i}">
+          ${opts.selectable ? `<td><input type="checkbox" class="sel-box" data-id="${esc(r.id || r.placeId)}"></td>` : ''}
           <td>${opts.saveBtn ? oppCell(r) : scorePill(r.opportunityScore)}</td>
           <td><div><b>${esc(r.name)}</b></div><div class="sub">${esc(r.address)}</div></td>
           <td>${r.rating ? r.rating + '★' : '<span class="badge badge-red">none</span>'}</td>
@@ -506,7 +510,7 @@ function leadsTable(rows, opts = {}) {
 function bindLeadRows(rows, search) {
   document.querySelectorAll('tr.row-click').forEach((tr) => {
     tr.addEventListener('click', (e) => {
-      if (e.target.closest('.save-one')) return;
+      if (e.target.closest('.save-one') || e.target.closest('.sel-box')) return;
       openLeadModal(rows[Number(tr.dataset.i)]);
     });
   });
@@ -517,6 +521,46 @@ function bindLeadRows(rows, search) {
       if (search) renderResults(search);
     });
   });
+}
+
+// Wire checkbox selection + bulk-delete bar (used on saved-lead tables).
+function wireSelection(afterDelete) {
+  const bar = $('#bulk-bar');
+  if (!bar) return;
+  const boxes = () => [...document.querySelectorAll('.sel-box')];
+  const selectedIds = () => boxes().filter((b) => b.checked).map((b) => b.dataset.id);
+  const update = () => {
+    const n = selectedIds().length;
+    bar.style.display = n ? 'flex' : 'none';
+    const c = $('#bulk-count');
+    if (c) c.textContent = `${n} selected`;
+    const all = document.querySelector('.sel-all');
+    if (all) {
+      const bs = boxes();
+      all.checked = bs.length > 0 && bs.every((b) => b.checked);
+      all.indeterminate = !all.checked && bs.some((b) => b.checked);
+    }
+  };
+  boxes().forEach((b) => (b.onchange = update));
+  const all = document.querySelector('.sel-all');
+  if (all) all.onchange = () => { boxes().forEach((b) => (b.checked = all.checked)); update(); };
+  $('#bulk-clear').onclick = () => { boxes().forEach((b) => (b.checked = false)); update(); };
+  $('#bulk-del').onclick = async () => {
+    const ids = selectedIds();
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} lead${ids.length > 1 ? 's' : ''}? This cannot be undone.`)) return;
+    for (const id of ids) await store.remove(id);
+    toast(`Deleted ${ids.length} lead${ids.length > 1 ? 's' : ''}`);
+    afterDelete();
+  };
+}
+
+function bulkBarHtml() {
+  return `<div class="bulk-bar" id="bulk-bar" style="display:none">
+    <span id="bulk-count">0 selected</span>
+    <button class="btn-danger btn-sm" id="bulk-del">🗑 Delete selected</button>
+    <button class="btn-ghost btn-sm" id="bulk-clear">Clear</button>
+  </div>`;
 }
 
 // -------- website audit block (inside lead modal)
@@ -813,16 +857,26 @@ function openOutreachModal(lead) {
 }
 
 // -------- my leads (pipeline)
+let leadsView = 'board'; // 'board' | 'list'
+
 async function viewLeads() {
   const leads = await store.list();
   $('#main').innerHTML = `
     <div class="flex spread">
-      <div><h1>My Leads</h1><p class="subtitle">Drag leads through your pipeline by opening them and changing status.</p></div>
-      <button class="btn-ghost btn-sm no-print" id="csv-all" ${leads.length ? '' : 'disabled'}>⬇️ Export CSV</button>
+      <div><h1>My Leads</h1><p class="subtitle">${leadsView === 'board' ? 'Open a lead to move it through your pipeline.' : 'Select leads to delete in bulk, or open one to manage it.'}</p></div>
+      <div class="flex no-print">
+        ${leads.length ? `<div class="seg">
+          <button class="seg-btn ${leadsView === 'board' ? 'on' : ''}" data-view="board">▦ Board</button>
+          <button class="seg-btn ${leadsView === 'list' ? 'on' : ''}" data-view="list">☰ List</button>
+        </div>` : ''}
+        <button class="btn-ghost btn-sm" id="csv-all" ${leads.length ? '' : 'disabled'}>⬇️ Export CSV</button>
+      </div>
     </div>
     ${leads.length === 0
       ? `<div class="card muted">No saved leads yet. <a href="#/find" style="color:var(--accent)">Find some →</a></div>`
-      : `<div class="pipeline">
+      : leadsView === 'list'
+        ? `${bulkBarHtml()}<div class="table-wrap">${leadsTable(leads, { selectable: true })}</div>`
+        : `<div class="pipeline">
           ${STATUSES.map((st) => {
             const col = leads.filter((l) => (l.status || 'new') === st);
             return `<div class="pipe-col"><h3>${STATUS_LABEL[st]} · ${col.length}</h3>
@@ -835,9 +889,13 @@ async function viewLeads() {
           }).join('')}
         </div>`}
   `;
+  document.querySelectorAll('.seg-btn').forEach((b) => {
+    b.onclick = () => { leadsView = b.dataset.view; viewLeads(); };
+  });
   document.querySelectorAll('.lead-card').forEach((c) => {
     c.onclick = async () => openLeadModal(await store.get(c.dataset.id));
   });
+  if (leadsView === 'list') { bindLeadRows(leads); wireSelection(viewLeads); }
   const csvBtn = $('#csv-all');
   if (csvBtn) csvBtn.onclick = () => exportCsv(leads, 'leadlion-pipeline');
 }
