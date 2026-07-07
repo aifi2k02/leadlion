@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "leadlion",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["-y", "wrangler@latest", "pages", "dev", "public", "--port", "8788"],
+      "cwd": "/Users/apple/Documents/Projects/leadlion",
+      "port": 8788
+    }
+  ]
+}

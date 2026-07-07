@@ -1,0 +1,600 @@
+/* LeadLion — local business lead finder & audit tool.
+   No build step. Storage: localStorage by default, Supabase when configured
+   in Settings (table: leads — see schema.sql). */
+
+// ---------------------------------------------------------------- settings
+const SETTINGS_KEY = 'leadlion_settings';
+
+function getSettings() {
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; }
+  catch { return {}; }
+}
+function saveSettings(patch) {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...getSettings(), ...patch }));
+}
+
+// ---------------------------------------------------------------- storage
+// Same interface for localStorage and Supabase so views don't care which.
+const LEADS_KEY = 'leadlion_leads';
+let supabase = null;
+
+async function initSupabase() {
+  const s = getSettings();
+  if (!s.supabaseUrl || !s.supabaseKey) return false;
+  try {
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    supabase = createClient(s.supabaseUrl, s.supabaseKey);
+    // probe the table so we fail fast and fall back to local
+    const { error } = await supabase.from('leads').select('id').limit(1);
+    if (error) throw new Error(error.message);
+    return true;
+  } catch (e) {
+    supabase = null;
+    console.warn('Supabase unavailable, using local storage:', e.message);
+    return false;
+  }
+}
+
+const store = {
+  local() {
+    try { return JSON.parse(localStorage.getItem(LEADS_KEY)) || []; }
+    catch { return []; }
+  },
+  writeLocal(leads) { localStorage.setItem(LEADS_KEY, JSON.stringify(leads)); },
+
+  async list() {
+    if (supabase) {
+      const { data, error } = await supabase.from('leads').select('*').order('created_at', { ascending: false });
+      if (error) { toast('Supabase read failed — using local'); return this.local(); }
+      return data.map((r) => ({ ...r.data, id: r.id, status: r.status, notes: r.notes || '' }));
+    }
+    return this.local();
+  },
+
+  async save(lead) {
+    const record = { ...lead, id: lead.placeId, status: lead.status || 'new', notes: lead.notes || '', savedAt: new Date().toISOString() };
+    if (supabase) {
+      const { error } = await supabase.from('leads').upsert({ id: record.id, status: record.status, notes: record.notes, data: record });
+      if (error) { toast('Supabase save failed: ' + error.message); return null; }
+      return record;
+    }
+    const leads = this.local().filter((l) => l.id !== record.id);
+    leads.unshift(record);
+    this.writeLocal(leads);
+    return record;
+  },
+
+  async update(id, patch) {
+    if (supabase) {
+      const leads = await this.list();
+      const lead = leads.find((l) => l.id === id);
+      if (!lead) return;
+      const updated = { ...lead, ...patch };
+      await supabase.from('leads').upsert({ id, status: updated.status, notes: updated.notes, data: updated });
+      return updated;
+    }
+    const leads = this.local();
+    const i = leads.findIndex((l) => l.id === id);
+    if (i === -1) return;
+    leads[i] = { ...leads[i], ...patch };
+    this.writeLocal(leads);
+    return leads[i];
+  },
+
+  async remove(id) {
+    if (supabase) { await supabase.from('leads').delete().eq('id', id); return; }
+    this.writeLocal(this.local().filter((l) => l.id !== id));
+  },
+
+  async get(id) {
+    return (await this.list()).find((l) => l.id === id);
+  },
+};
+
+// ---------------------------------------------------------------- helpers
+const $ = (sel, el = document) => el.querySelector(sel);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function toast(msg) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  $('#toast-root').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+function scorePill(opp) {
+  const cls = opp >= 55 ? 'score-hot' : opp >= 30 ? 'score-warm' : 'score-cold';
+  return `<span class="score-pill ${cls}">${opp}</span>`;
+}
+
+function gradeBadge(grade) {
+  const cls = grade === 'A' || grade === 'B' ? 'badge-green' : grade === 'C' ? 'badge-yellow' : 'badge-red';
+  return `<span class="badge ${cls}">Grade ${grade}</span>`;
+}
+
+const STATUSES = ['new', 'contacted', 'meeting', 'won', 'lost'];
+const STATUS_LABEL = { new: '🆕 New', contacted: '📞 Contacted', meeting: '🤝 Meeting', won: '✅ Won', lost: '❌ Lost' };
+
+// ---------------------------------------------------------------- outreach
+function buildOutreach(lead) {
+  const s = getSettings();
+  const agency = s.agencyName || 'Your Agency';
+  const topIssues = lead.issues.slice(0, 3);
+  const bullets = topIssues.map((i) => `  • ${i.text}`).join('\n');
+  const services = lead.services?.join(', ') || 'local SEO';
+
+  const email = `Subject: Quick question about ${lead.name}'s Google listing
+
+Hi there,
+
+I was searching for "${lead.keyword}" in ${lead.location} and came across ${lead.name}. I ran a quick audit of your Google Business Profile and noticed a few things that are likely costing you customers:
+
+${bullets}
+
+These are all fixable — most within a couple of weeks. I put together a free, no-obligation audit report that shows exactly where you stand against competitors nearby.
+
+Would you be open to a 10-minute call this week? I'll send the full report either way.
+
+Best,
+${agency}${s.agencyPhone ? '\n' + s.agencyPhone : ''}${s.agencyEmail ? '\n' + s.agencyEmail : ''}`;
+
+  const call = `CALL SCRIPT — ${lead.name}
+
+Opener:
+"Hi, could I speak to the owner or manager? ... Great — I'll be quick. My name is [name] from ${agency}. I was looking up ${lead.keyword} businesses in ${lead.location} and ran a free audit on your Google listing."
+
+Hook (their top problem):
+"${topIssues[0] ? topIssues[0].text + ' ' + (topIssues[0].pitch || '') : 'Your online presence has some quick wins available.'}"
+
+Value:
+"We help local businesses fix exactly this — ${services}. Most clients see more calls within 30 days."
+
+Close:
+"I've already prepared your audit report — can I email it over and grab 10 minutes this week to walk you through it?"
+
+Objection — "not interested":
+"Totally understand. Can I still send the free report? No strings — if nothing else you'll know what your competitors are doing better."`;
+
+  return { email, call };
+}
+
+// ---------------------------------------------------------------- views
+const routes = {
+  dashboard: viewDashboard,
+  find: viewFind,
+  leads: viewLeads,
+  settings: viewSettings,
+  report: viewReport,
+};
+
+let lastSearch = null; // cache results between navigations
+
+async function render() {
+  const hash = location.hash.replace(/^#\//, '') || 'dashboard';
+  const [route, param] = hash.split('/');
+  const view = routes[route] || viewDashboard;
+  document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === route));
+  $('#main').innerHTML = '<p class="muted">Loading…</p>';
+  await view(param);
+}
+
+// -------- dashboard
+async function viewDashboard() {
+  const leads = await store.list();
+  const avgOpp = leads.length ? Math.round(leads.reduce((a, l) => a + l.opportunityScore, 0) / leads.length) : 0;
+  const won = leads.filter((l) => l.status === 'won').length;
+  const active = leads.filter((l) => ['contacted', 'meeting'].includes(l.status)).length;
+  const recent = leads.slice(0, 6);
+
+  $('#main').innerHTML = `
+    <h1>Dashboard</h1>
+    <p class="subtitle">Your local lead-gen command center.</p>
+    <div class="grid grid-4 mb">
+      <div class="card"><div class="stat-num">${leads.length}</div><div class="stat-label">Saved leads</div></div>
+      <div class="card"><div class="stat-num">${avgOpp}</div><div class="stat-label">Avg. opportunity score</div></div>
+      <div class="card"><div class="stat-num">${active}</div><div class="stat-label">In conversation</div></div>
+      <div class="card"><div class="stat-num">${won}</div><div class="stat-label">Clients won</div></div>
+    </div>
+    ${leads.length === 0 ? `
+      <div class="card">
+        <h2 style="margin-top:0">Get your first leads in 30 seconds</h2>
+        <p class="muted mb">Search any niche + city. LeadLion scores every business by how badly they need your help — then generates the audit report and outreach script to close them.</p>
+        <a class="btn" href="#/find">🔍 Find leads now</a>
+      </div>` : `
+      <h2>Recent leads</h2>
+      <div class="table-wrap">${leadsTable(recent)}</div>`}
+  `;
+  bindLeadRows(recent);
+}
+
+// -------- find leads
+async function viewFind() {
+  const s = getSettings();
+  $('#main').innerHTML = `
+    <h1>Find Leads</h1>
+    <p class="subtitle">Search any niche in any city — every result is scored by sales opportunity.</p>
+    <div class="card">
+      <div class="search-row">
+        <div class="field"><label>Niche / keyword</label><input id="kw" placeholder="e.g. plumber, dentist, roofing" value="${esc(lastSearch?.keyword || '')}"></div>
+        <div class="field"><label>Location</label><input id="loc" placeholder="e.g. Austin TX, Manchester UK" value="${esc(lastSearch?.location || '')}"></div>
+        <button id="go">Search</button>
+      </div>
+      ${!s.googleApiKey ? `<p class="muted mt" style="font-size:13px">💡 No Google API key set — you'll get realistic <b>demo data</b>. Add your free key in <a href="#/settings" style="color:var(--accent)">Settings</a> for live results.</p>` : ''}
+    </div>
+    <div id="results"></div>
+  `;
+  $('#go').onclick = runSearch;
+  $('#kw').onkeydown = $('#loc').onkeydown = (e) => { if (e.key === 'Enter') runSearch(); };
+  if (lastSearch?.results) renderResults(lastSearch);
+}
+
+async function runSearch() {
+  const keyword = $('#kw').value.trim();
+  const location = $('#loc').value.trim();
+  if (!keyword || !location) return toast('Enter both a keyword and a location');
+  const btn = $('#go');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+  try {
+    const res = await fetch('/api/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keyword, location, apiKey: getSettings().googleApiKey || undefined }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Search failed');
+    lastSearch = { keyword, location, mode: data.mode, results: data.results, filters: {} };
+    renderResults(lastSearch);
+  } catch (e) {
+    toast('Search error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Search';
+  }
+}
+
+function applyFilters(search) {
+  const f = search.filters || {};
+  return search.results.filter((r) =>
+    (!f.noWebsite || !r.website) &&
+    (!f.unclaimed || r.claimed === false) &&
+    (!f.lowRating || (r.rating && r.rating < 4)) &&
+    (!f.fewReviews || (r.reviewCount || 0) < 25) &&
+    (!f.hot || r.opportunityScore >= 55)
+  );
+}
+
+function renderResults(search) {
+  const shown = applyFilters(search);
+  const saved = new Set(store.local().map((l) => l.id));
+  $('#results').innerHTML = `
+    ${search.mode === 'demo' ? `<div class="banner banner-warn mt">🧪 Demo data (deterministic sample). Add your Google Places API key in Settings for live business data.</div>` : `<div class="banner banner-info mt">📡 Live Google data.</div>`}
+    <div class="filter-bar">
+      <span class="muted" style="font-size:13px">${shown.length} of ${search.results.length} businesses</span>
+      ${chip('hot', '🔥 Hot leads (55+)', search)}
+      ${chip('noWebsite', 'No website', search)}
+      ${chip('unclaimed', 'Unclaimed', search)}
+      ${chip('lowRating', 'Rating < 4★', search)}
+      ${chip('fewReviews', '< 25 reviews', search)}
+      <span style="flex:1"></span>
+      <button class="btn-ghost btn-sm" id="save-all">💾 Save all shown</button>
+      <button class="btn-ghost btn-sm" id="csv">⬇️ CSV</button>
+    </div>
+    <div class="table-wrap">${leadsTable(shown, { saveBtn: true, saved })}</div>
+  `;
+  document.querySelectorAll('.chip').forEach((c) => {
+    c.onclick = () => { search.filters[c.dataset.f] = !search.filters[c.dataset.f]; renderResults(search); };
+  });
+  $('#save-all').onclick = async () => {
+    for (const r of shown) await store.save(r);
+    toast(`Saved ${shown.length} leads`);
+    renderResults(search);
+  };
+  $('#csv').onclick = () => exportCsv(shown, `${search.keyword}-${search.location}`);
+  bindLeadRows(shown, search);
+}
+
+function chip(key, label, search) {
+  return `<span class="chip ${search.filters[key] ? 'on' : ''}" data-f="${key}">${label}</span>`;
+}
+
+// -------- shared table
+function leadsTable(rows, opts = {}) {
+  if (!rows.length) return '<div class="card muted">Nothing here yet.</div>';
+  return `<table>
+    <thead><tr>
+      <th>Opportunity</th><th>Business</th><th>Rating</th><th>Reviews</th><th>Website</th><th>Grade</th>${opts.saveBtn ? '<th></th>' : '<th>Status</th>'}
+    </tr></thead>
+    <tbody>
+      ${rows.map((r, i) => `
+        <tr class="row-click" data-i="${i}">
+          <td>${scorePill(r.opportunityScore)}</td>
+          <td><div><b>${esc(r.name)}</b></div><div class="sub">${esc(r.address)}</div></td>
+          <td>${r.rating ? r.rating + '★' : '<span class="badge badge-red">none</span>'}</td>
+          <td>${r.reviewCount ?? 0}</td>
+          <td>${r.website ? '✅' : '<span class="badge badge-red">missing</span>'}</td>
+          <td>${gradeBadge(r.grade)}</td>
+          ${opts.saveBtn
+            ? `<td>${opts.saved?.has(r.placeId) ? '<span class="badge badge-green">saved</span>' : `<button class="btn-sm save-one" data-i="${i}">Save</button>`}</td>`
+            : `<td><span class="badge badge-blue">${STATUS_LABEL[r.status] || r.status || ''}</span></td>`}
+        </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+function bindLeadRows(rows, search) {
+  document.querySelectorAll('tr.row-click').forEach((tr) => {
+    tr.addEventListener('click', (e) => {
+      if (e.target.closest('.save-one')) return;
+      openLeadModal(rows[Number(tr.dataset.i)]);
+    });
+  });
+  document.querySelectorAll('.save-one').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await store.save(rows[Number(btn.dataset.i)]);
+      toast('Lead saved');
+      if (search) renderResults(search);
+    });
+  });
+}
+
+// -------- lead modal
+async function openLeadModal(lead) {
+  const savedLead = await store.get(lead.placeId || lead.id);
+  const l = savedLead || lead;
+  const isSaved = !!savedLead;
+  $('#modal-root').innerHTML = `
+    <div class="modal-overlay" id="overlay">
+      <div class="modal">
+        <button class="modal-close" id="close">✕</button>
+        <h2>${esc(l.name)}</h2>
+        <p class="muted">${esc(l.address)} ${l.mapsUrl ? `· <a href="${esc(l.mapsUrl)}" target="_blank" style="color:var(--accent)">Maps ↗</a>` : ''}</p>
+        <div class="flex mb mt">
+          ${scorePill(l.opportunityScore)} <span class="muted" style="font-size:13px">opportunity</span>
+          ${gradeBadge(l.grade)}
+          ${l.phone ? `<span class="badge badge-muted">📞 ${esc(l.phone)}</span>` : ''}
+          ${l.website ? `<a class="badge badge-muted" href="${esc(l.website)}" target="_blank" style="text-decoration:none">🌐 website ↗</a>` : ''}
+        </div>
+        <h2 style="font-size:15px">Audit findings</h2>
+        <div class="mb">
+          ${l.findings.map((f) => `
+            <div class="finding">
+              <span class="icon">${f.ok ? '✅' : f.severity === 'critical' ? '🔴' : f.severity === 'warning' ? '🟡' : 'ℹ️'}</span>
+              <div><div>${esc(f.text)} <span class="muted" style="font-size:12px">(${f.points}/${f.max} pts)</span></div>
+              ${f.pitch ? `<div class="pitch">💰 ${esc(f.pitch)}</div>` : ''}</div>
+            </div>`).join('')}
+        </div>
+        ${isSaved ? `
+          <label>Pipeline status</label>
+          <select id="lead-status">${STATUSES.map((st) => `<option value="${st}" ${l.status === st ? 'selected' : ''}>${STATUS_LABEL[st]}</option>`).join('')}</select>
+          <label>Notes</label>
+          <textarea id="lead-notes" rows="3" placeholder="Call outcomes, contact name, next steps…">${esc(l.notes || '')}</textarea>` : ''}
+        <div class="flex mt spread">
+          <div class="flex">
+            ${isSaved
+              ? `<a class="btn" href="#/report/${encodeURIComponent(l.id)}">📄 Audit report</a>
+                 <button class="btn-ghost" id="outreach">✉️ Outreach scripts</button>`
+              : `<button id="save-lead">💾 Save lead</button>
+                 <button class="btn-ghost" id="outreach">✉️ Outreach scripts</button>`}
+          </div>
+          ${isSaved ? `<button class="btn-danger btn-sm" id="del-lead">Delete</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+
+  const close = () => { $('#modal-root').innerHTML = ''; };
+  $('#close').onclick = close;
+  $('#overlay').onclick = (e) => { if (e.target.id === 'overlay') close(); };
+
+  if (isSaved) {
+    $('#lead-status').onchange = async (e) => { await store.update(l.id, { status: e.target.value }); toast('Status updated'); };
+    $('#lead-notes').onblur = async (e) => { await store.update(l.id, { notes: e.target.value }); };
+    $('#del-lead').onclick = async () => { await store.remove(l.id); toast('Lead deleted'); close(); render(); };
+  } else {
+    $('#save-lead').onclick = async () => { await store.save(l); toast('Lead saved — audit report unlocked'); openLeadModal(l); };
+  }
+  $('#outreach').onclick = () => openOutreachModal(l);
+}
+
+function openOutreachModal(lead) {
+  const { email, call } = buildOutreach(lead);
+  $('#modal-root').innerHTML = `
+    <div class="modal-overlay" id="overlay">
+      <div class="modal">
+        <button class="modal-close" id="close">✕</button>
+        <h2>Outreach — ${esc(lead.name)}</h2>
+        <p class="muted mb">Personalized from this business's actual audit findings.</p>
+        <div class="flex spread"><label>Cold email</label><button class="btn-ghost btn-sm" data-copy="email">Copy</button></div>
+        <textarea class="script" id="script-email" rows="12">${esc(email)}</textarea>
+        <div class="flex spread mt"><label>Phone script</label><button class="btn-ghost btn-sm" data-copy="call">Copy</button></div>
+        <textarea class="script" id="script-call" rows="12">${esc(call)}</textarea>
+      </div>
+    </div>`;
+  $('#close').onclick = () => openLeadModal(lead);
+  $('#overlay').onclick = (e) => { if (e.target.id === 'overlay') $('#modal-root').innerHTML = ''; };
+  document.querySelectorAll('[data-copy]').forEach((b) => {
+    b.onclick = () => {
+      navigator.clipboard.writeText($(`#script-${b.dataset.copy}`).value);
+      toast('Copied to clipboard');
+    };
+  });
+}
+
+// -------- my leads (pipeline)
+async function viewLeads() {
+  const leads = await store.list();
+  $('#main').innerHTML = `
+    <div class="flex spread">
+      <div><h1>My Leads</h1><p class="subtitle">Drag leads through your pipeline by opening them and changing status.</p></div>
+      <button class="btn-ghost btn-sm no-print" id="csv-all" ${leads.length ? '' : 'disabled'}>⬇️ Export CSV</button>
+    </div>
+    ${leads.length === 0
+      ? `<div class="card muted">No saved leads yet. <a href="#/find" style="color:var(--accent)">Find some →</a></div>`
+      : `<div class="pipeline">
+          ${STATUSES.map((st) => {
+            const col = leads.filter((l) => (l.status || 'new') === st);
+            return `<div class="pipe-col"><h3>${STATUS_LABEL[st]} · ${col.length}</h3>
+              ${col.map((l) => `
+                <div class="lead-card" data-id="${esc(l.id)}">
+                  <div class="name">${esc(l.name)}</div>
+                  <div class="meta"><span>${esc(l.keyword || '')}</span>${scorePill(l.opportunityScore)}</div>
+                </div>`).join('')}
+            </div>`;
+          }).join('')}
+        </div>`}
+  `;
+  document.querySelectorAll('.lead-card').forEach((c) => {
+    c.onclick = async () => openLeadModal(await store.get(c.dataset.id));
+  });
+  const csvBtn = $('#csv-all');
+  if (csvBtn) csvBtn.onclick = () => exportCsv(leads, 'leadlion-pipeline');
+}
+
+// -------- report
+async function viewReport(id) {
+  const lead = await store.get(decodeURIComponent(id || ''));
+  if (!lead) { $('#main').innerHTML = '<div class="card">Lead not found. <a href="#/leads" style="color:var(--accent)">Back to leads</a></div>'; return; }
+  const s = getSettings();
+  const ringColor = lead.healthScore >= 70 ? '#34d399' : lead.healthScore >= 45 ? '#fbbf24' : '#f87171';
+  const critical = lead.issues.filter((i) => i.severity === 'critical');
+  const other = lead.issues.filter((i) => i.severity !== 'critical');
+
+  $('#main').innerHTML = `
+    <div class="flex spread mb no-print">
+      <a class="btn-ghost btn-sm" href="#/leads">← Back</a>
+      <button onclick="window.print()">🖨️ Print / Save as PDF</button>
+    </div>
+    <div class="report-page">
+      <div class="report-head">
+        <div class="report-agency">${esc(s.agencyName || 'Your Agency Name')}<div class="sub">${esc(s.agencyTagline || 'Local Marketing Specialists')}</div></div>
+        <div style="text-align:right;font-size:13px;color:#718096">
+          ${esc(s.agencyEmail || '')}<br>${esc(s.agencyPhone || '')}<br>${esc(s.agencyWebsite || '')}
+        </div>
+      </div>
+      <h1 style="font-size:26px">Google Business Profile Audit</h1>
+      <p style="color:#4a5568">${esc(lead.name)} · ${esc(lead.address)}</p>
+      <p style="color:#718096;font-size:13px">Prepared ${new Date().toLocaleDateString()} · Searched as "${esc(lead.keyword)}" in ${esc(lead.location)}</p>
+
+      <div class="report-grade">
+        <div class="report-score-ring" style="background:conic-gradient(${ringColor} ${lead.healthScore * 3.6}deg, #e2e8f0 0deg)">
+          <div style="background:#fff;color:#1a202c;width:96px;height:96px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center">
+            <div>${lead.healthScore}</div><div style="font-size:11px;font-weight:500;color:#718096">/ 100</div>
+          </div>
+        </div>
+        <div class="label">Listing Health Score — Grade <b>${lead.grade}</b></div>
+      </div>
+
+      <div class="report-section">
+        <h2>Snapshot</h2>
+        <div class="report-meta-grid">
+          <span class="k">Star rating</span><span>${lead.rating ? lead.rating + ' ★' : 'No rating'}</span>
+          <span class="k">Reviews</span><span>${lead.reviewCount ?? 0}</span>
+          <span class="k">Website</span><span>${lead.website ? 'Yes' : '❌ Missing'}</span>
+          <span class="k">Phone</span><span>${lead.phone || '❌ Missing'}</span>
+          <span class="k">Photos</span><span>${lead.photoCount ?? 0}</span>
+          <span class="k">Hours listed</span><span>${lead.hasHours ? 'Yes' : '❌ Missing'}</span>
+        </div>
+      </div>
+
+      ${critical.length ? `<div class="report-section"><h2>🔴 Critical issues (${critical.length})</h2>
+        ${critical.map((i) => `<div class="report-finding"><span>🔴</span><div><b>${esc(i.text)}</b>${i.pitch ? `<div class="pitch">${esc(i.pitch)}</div>` : ''}</div></div>`).join('')}</div>` : ''}
+
+      ${other.length ? `<div class="report-section"><h2>🟡 Improvement opportunities (${other.length})</h2>
+        ${other.map((i) => `<div class="report-finding"><span>🟡</span><div><b>${esc(i.text)}</b>${i.pitch ? `<div class="pitch">${esc(i.pitch)}</div>` : ''}</div></div>`).join('')}</div>` : ''}
+
+      <div class="report-section"><h2>✅ What's working</h2>
+        ${lead.findings.filter((f) => f.ok).map((f) => `<div class="report-finding"><span>✅</span><div>${esc(f.text)}</div></div>`).join('')}
+      </div>
+
+      <div class="report-cta">
+        <h3>Recommended next steps</h3>
+        <p style="font-size:14px;color:#4a5568">${esc(lead.name)} is currently leaving customers on the table. Our recommended priority: <b>${esc((lead.services || []).join(' → ') || 'GMB optimization')}</b>. ${esc(s.agencyName || 'We')} can typically resolve the critical issues above within 2–4 weeks.</p>
+        <p style="font-size:14px;margin-top:8px"><b>Contact:</b> ${esc(s.agencyEmail || 'your@email.com')} ${s.agencyPhone ? '· ' + esc(s.agencyPhone) : ''}</p>
+      </div>
+    </div>
+  `;
+}
+
+// -------- settings
+async function viewSettings() {
+  const s = getSettings();
+  $('#main').innerHTML = `
+    <h1>Settings</h1>
+    <p class="subtitle">Branding appears on your audit reports. Keys are stored only in this browser.</p>
+
+    <div class="card mb">
+      <h2 style="margin-top:0">🏢 Agency branding</h2>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Agency name</label><input id="s-name" value="${esc(s.agencyName || '')}" placeholder="Acme Digital"></div>
+        <div><label>Tagline</label><input id="s-tag" value="${esc(s.agencyTagline || '')}" placeholder="Local Marketing Specialists"></div>
+        <div><label>Email</label><input id="s-email" value="${esc(s.agencyEmail || '')}" placeholder="you@agency.com"></div>
+        <div><label>Phone</label><input id="s-phone" value="${esc(s.agencyPhone || '')}" placeholder="(555) 123-4567"></div>
+        <div><label>Website</label><input id="s-web" value="${esc(s.agencyWebsite || '')}" placeholder="agency.com"></div>
+      </div>
+    </div>
+
+    <div class="card mb">
+      <h2 style="margin-top:0">🔑 Google Places API key <span class="badge badge-muted">optional</span></h2>
+      <p class="muted" style="font-size:13.5px">Without a key you get demo data. Get a free key at <code class="inline">console.cloud.google.com</code> → enable <b>Places API (New)</b> → thousands of free searches/month. For production, set it as a Cloudflare Pages secret <code class="inline">GOOGLE_PLACES_API_KEY</code> instead so it never touches the browser.</p>
+      <label>API key</label><input id="s-gkey" type="password" value="${esc(s.googleApiKey || '')}" placeholder="AIza…">
+    </div>
+
+    <div class="card mb">
+      <h2 style="margin-top:0">🗄️ Supabase sync <span class="badge badge-muted">optional</span></h2>
+      <p class="muted" style="font-size:13.5px">Leads live in this browser until you connect Supabase (then they sync across devices). Run <code class="inline">schema.sql</code> in your Supabase SQL editor first.</p>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Project URL</label><input id="s-surl" value="${esc(s.supabaseUrl || '')}" placeholder="https://xxxx.supabase.co"></div>
+        <div><label>Anon key</label><input id="s-skey" type="password" value="${esc(s.supabaseKey || '')}" placeholder="eyJ…"></div>
+      </div>
+    </div>
+
+    <div class="flex">
+      <button id="save-settings">Save settings</button>
+      <button class="btn-ghost" id="test-supa">Test Supabase connection</button>
+    </div>
+  `;
+  $('#save-settings').onclick = async () => {
+    saveSettings({
+      agencyName: $('#s-name').value.trim(),
+      agencyTagline: $('#s-tag').value.trim(),
+      agencyEmail: $('#s-email').value.trim(),
+      agencyPhone: $('#s-phone').value.trim(),
+      agencyWebsite: $('#s-web').value.trim(),
+      googleApiKey: $('#s-gkey').value.trim(),
+      supabaseUrl: $('#s-surl').value.trim(),
+      supabaseKey: $('#s-skey').value.trim(),
+    });
+    toast('Settings saved');
+    updateStorageBadge(await initSupabase());
+  };
+  $('#test-supa').onclick = async () => {
+    saveSettings({ supabaseUrl: $('#s-surl').value.trim(), supabaseKey: $('#s-skey').value.trim() });
+    const ok = await initSupabase();
+    updateStorageBadge(ok);
+    toast(ok ? '✅ Supabase connected' : '❌ Could not connect — check URL/key and that schema.sql was run');
+  };
+}
+
+// -------- csv
+function exportCsv(rows, name) {
+  const cols = ['name', 'address', 'phone', 'website', 'rating', 'reviewCount', 'opportunityScore', 'grade', 'status', 'keyword', 'location'];
+  const csvCell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const csv = [cols.join(','), ...rows.map((r) => cols.map((c) => csvCell(r[c])).join(','))].join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = `${name.replace(/[^a-z0-9-]+/gi, '-').toLowerCase()}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast(`Exported ${rows.length} rows`);
+}
+
+// ---------------------------------------------------------------- boot
+function updateStorageBadge(supaOk) {
+  const b = $('#storage-badge');
+  b.textContent = supaOk ? 'Supabase synced' : 'Local storage';
+  b.className = supaOk ? 'badge badge-green' : 'badge badge-muted';
+}
+
+window.addEventListener('hashchange', render);
+initSupabase().then(updateStorageBadge).then(render);
