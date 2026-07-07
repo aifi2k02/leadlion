@@ -117,12 +117,20 @@ const STATUSES = ['new', 'contacted', 'meeting', 'won', 'lost'];
 const STATUS_LABEL = { new: '🆕 New', contacted: '📞 Contacted', meeting: '🤝 Meeting', won: '✅ Won', lost: '❌ Lost' };
 
 // ---------------------------------------------------------------- outreach
+function allIssues(lead) {
+  // GMB issues first, then website-audit issues, criticals before warnings
+  const rank = { critical: 0, warning: 1, info: 2 };
+  const gmb = [...(lead.issues || [])].sort((a, b) => rank[a.severity] - rank[b.severity]);
+  const web = [...(lead.webAudit?.issues || [])].sort((a, b) => rank[a.severity] - rank[b.severity]);
+  return [...gmb, ...web];
+}
+
 function buildOutreach(lead) {
   const s = getSettings();
   const agency = s.agencyName || 'Your Agency';
-  const topIssues = lead.issues.slice(0, 3);
+  const topIssues = allIssues(lead).slice(0, 4);
   const bullets = topIssues.map((i) => `  • ${i.text}`).join('\n');
-  const services = lead.services?.join(', ') || 'local SEO';
+  const services = [...new Set([...(lead.services || []), ...(lead.webAudit?.issues || []).map((i) => i.service)])].filter(Boolean).join(', ') || 'local SEO';
 
   const email = `Subject: Quick question about ${lead.name}'s Google listing
 
@@ -339,6 +347,46 @@ function bindLeadRows(rows, search) {
   });
 }
 
+// -------- website audit block (inside lead modal)
+function webAuditBlock(l) {
+  const w = l.webAudit;
+  if (!w) {
+    return `
+      <div class="card mb" style="padding:14px 16px">
+        <div class="flex spread">
+          <div>
+            <b>🌐 Website audit</b>
+            <div class="muted" style="font-size:13px">Their GMB may be strong — their website is where the deal often hides.</div>
+          </div>
+          <button class="btn-sm" id="run-webaudit">Run website audit</button>
+        </div>
+      </div>`;
+  }
+  if (w.reachable === false) {
+    return `
+      <h2 style="font-size:15px">Website audit ${gradeBadge(w.grade)}</h2>
+      <div class="mb">
+        <div class="finding"><span class="icon">🔴</span>
+          <div><div><b>${esc(w.findings[0].text)}</b></div>
+          <div class="pitch">💰 ${esc(w.findings[0].pitch)}</div></div>
+        </div>
+      </div>`;
+  }
+  const passed = w.findings.filter((f) => f.ok);
+  return `
+    <h2 style="font-size:15px">Website audit ${gradeBadge(w.grade)} <span class="muted" style="font-size:12px;font-weight:400">score ${w.websiteScore}/100 · ${(w.ms / 1000).toFixed(1)}s response</span></h2>
+    <div class="mb">
+      ${w.issues.map((f) => `
+        <div class="finding">
+          <span class="icon">${f.severity === 'critical' ? '🔴' : f.severity === 'warning' ? '🟡' : 'ℹ️'}</span>
+          <div><div>${esc(f.text)}</div>
+          ${f.pitch ? `<div class="pitch">💰 ${esc(f.pitch)}</div>` : ''}</div>
+        </div>`).join('')}
+      ${passed.length ? `<div class="finding"><span class="icon">✅</span><div class="muted">${passed.length} checks passed: ${passed.map((f) => f.label).join(', ')}</div></div>` : ''}
+      ${w.emails?.length ? `<div class="finding"><span class="icon">📧</span><div><b>Email found on site:</b> ${w.emails.map(esc).join(', ')}</div></div>` : ''}
+    </div>`;
+}
+
 // -------- lead modal
 async function openLeadModal(lead) {
   const savedLead = await store.get(lead.placeId || lead.id);
@@ -356,7 +404,7 @@ async function openLeadModal(lead) {
           ${l.phone ? `<span class="badge badge-muted">📞 ${esc(l.phone)}</span>` : ''}
           ${l.website ? `<a class="badge badge-muted" href="${esc(l.website)}" target="_blank" style="text-decoration:none">🌐 website ↗</a>` : ''}
         </div>
-        <h2 style="font-size:15px">Audit findings</h2>
+        <h2 style="font-size:15px">GMB audit findings</h2>
         <div class="mb">
           ${l.findings.map((f) => `
             <div class="finding">
@@ -365,6 +413,7 @@ async function openLeadModal(lead) {
               ${f.pitch ? `<div class="pitch">💰 ${esc(f.pitch)}</div>` : ''}</div>
             </div>`).join('')}
         </div>
+        ${l.website ? webAuditBlock(l) : ''}
         ${isSaved ? `
           <label>Pipeline status</label>
           <select id="lead-status">${STATUSES.map((st) => `<option value="${st}" ${l.status === st ? 'selected' : ''}>${STATUS_LABEL[st]}</option>`).join('')}</select>
@@ -387,6 +436,36 @@ async function openLeadModal(lead) {
   $('#close').onclick = close;
   $('#overlay').onclick = (e) => { if (e.target.id === 'overlay') close(); };
 
+  const auditBtn = $('#run-webaudit');
+  if (auditBtn) {
+    auditBtn.onclick = async () => {
+      auditBtn.disabled = true;
+      auditBtn.innerHTML = '<span class="spinner"></span> Auditing…';
+      try {
+        const res = await fetch('/api/webaudit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: l.website }),
+        });
+        const audit = await res.json();
+        if (!res.ok) throw new Error(audit.error || 'Audit failed');
+        l.webAudit = audit;
+        if (isSaved) await store.update(l.id, { webAudit: audit });
+        // keep search results in sync so re-opening shows the audit
+        if (lastSearch?.results) {
+          const r = lastSearch.results.find((x) => x.placeId === (l.placeId || l.id));
+          if (r) r.webAudit = audit;
+        }
+        toast(`Website graded ${audit.grade} (${audit.websiteScore}/100)`);
+        openLeadModal(l);
+      } catch (e) {
+        toast('Audit error: ' + e.message);
+        auditBtn.disabled = false;
+        auditBtn.textContent = 'Run website audit';
+      }
+    };
+  }
+
   if (isSaved) {
     $('#lead-status').onchange = async (e) => { await store.update(l.id, { status: e.target.value }); toast('Status updated'); };
     $('#lead-notes').onblur = async (e) => { await store.update(l.id, { notes: e.target.value }); };
@@ -405,6 +484,7 @@ function openOutreachModal(lead) {
         <button class="modal-close" id="close">✕</button>
         <h2>Outreach — ${esc(lead.name)}</h2>
         <p class="muted mb">Personalized from this business's actual audit findings.</p>
+        ${lead.webAudit?.emails?.length ? `<div class="banner banner-info">📧 Send to: <b>${lead.webAudit.emails.map(esc).join(', ')}</b> <span class="muted">(found on their website)</span></div>` : ''}
         <div class="flex spread"><label>Cold email</label><button class="btn-ghost btn-sm" data-copy="email">Copy</button></div>
         <textarea class="script" id="script-email" rows="12">${esc(email)}</textarea>
         <div class="flex spread mt"><label>Phone script</label><button class="btn-ghost btn-sm" data-copy="call">Copy</button></div>
@@ -507,9 +587,20 @@ async function viewReport(id) {
         ${lead.findings.filter((f) => f.ok).map((f) => `<div class="report-finding"><span>✅</span><div>${esc(f.text)}</div></div>`).join('')}
       </div>
 
+      ${lead.webAudit ? `
+      <div class="report-section">
+        <h2>🌐 Website audit — Grade ${lead.webAudit.grade} (${lead.webAudit.websiteScore}/100)</h2>
+        ${lead.webAudit.reachable === false
+          ? `<div class="report-finding"><span>🔴</span><div><b>${esc(lead.webAudit.findings[0].text)}</b><div class="pitch">${esc(lead.webAudit.findings[0].pitch)}</div></div></div>`
+          : `
+            ${lead.webAudit.issues.map((i) => `<div class="report-finding"><span>${i.severity === 'critical' ? '🔴' : i.severity === 'warning' ? '🟡' : 'ℹ️'}</span><div><b>${esc(i.text)}</b>${i.pitch ? `<div class="pitch">${esc(i.pitch)}</div>` : ''}</div></div>`).join('')}
+            ${lead.webAudit.findings.filter((f) => f.ok).map((f) => `<div class="report-finding"><span>✅</span><div>${esc(f.text)}</div></div>`).join('')}
+          `}
+      </div>` : ''}
+
       <div class="report-cta">
         <h3>Recommended next steps</h3>
-        <p style="font-size:14px;color:#4a5568">${esc(lead.name)} is currently leaving customers on the table. Our recommended priority: <b>${esc((lead.services || []).join(' → ') || 'GMB optimization')}</b>. ${esc(s.agencyName || 'We')} can typically resolve the critical issues above within 2–4 weeks.</p>
+        <p style="font-size:14px;color:#4a5568">${esc(lead.name)} is currently leaving customers on the table. Our recommended priority: <b>${esc([...new Set([...(lead.services || []), ...(lead.webAudit?.issues || []).map((i) => i.service)])].filter(Boolean).join(' → ') || 'GMB optimization')}</b>. ${esc(s.agencyName || 'We')} can typically resolve the critical issues above within 2–4 weeks.</p>
         <p style="font-size:14px;margin-top:8px"><b>Contact:</b> ${esc(s.agencyEmail || 'your@email.com')} ${s.agencyPhone ? '· ' + esc(s.agencyPhone) : ''}</p>
       </div>
     </div>
