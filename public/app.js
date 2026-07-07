@@ -658,13 +658,17 @@ async function openLeadModal(lead) {
             <button class="btn-wa" id="wa-quick">💬 WhatsApp</button>
             <button class="btn-ghost" id="outreach">✉️ Scripts</button>
           </div>
-          ${isSaved ? `<button class="btn-danger btn-sm" id="del-lead">Delete</button>` : ''}
+          <div class="flex">
+            <button class="btn-ghost" id="close-bottom">✕ Close</button>
+            ${isSaved ? `<button class="btn-danger btn-sm" id="del-lead">Delete</button>` : ''}
+          </div>
         </div>
       </div>
     </div>`;
 
   const close = () => { $('#modal-root').innerHTML = ''; };
   $('#close').onclick = close;
+  $('#close-bottom').onclick = close;
   $('#overlay').onclick = (e) => { if (e.target.id === 'overlay') close(); };
 
   const auditBtn = $('#run-webaudit');
@@ -786,9 +790,11 @@ function openOutreachModal(lead) {
         <textarea class="script" id="script-email" rows="11">${esc(email)}</textarea>
         <div class="flex spread mt"><label>Phone script</label><button class="btn-ghost btn-sm" data-copy="call">Copy</button></div>
         <textarea class="script" id="script-call" rows="11">${esc(call)}</textarea>
+        <button class="btn-ghost mt" id="close-bottom" style="width:100%">✕ Close</button>
       </div>
     </div>`;
   $('#close').onclick = () => openLeadModal(lead);
+  $('#close-bottom').onclick = () => openLeadModal(lead);
   $('#overlay').onclick = (e) => { if (e.target.id === 'overlay') $('#modal-root').innerHTML = ''; };
   document.querySelectorAll('[data-copy]').forEach((b) => {
     b.onclick = () => {
