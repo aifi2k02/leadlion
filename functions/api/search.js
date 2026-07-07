@@ -20,6 +20,7 @@ const FIELD_MASK = [
   'places.googleMapsUri',
   'places.primaryTypeDisplayName',
   'places.editorialSummary',
+  'places.location',
   'nextPageToken', // enables pagination (top-level, no places. prefix)
 ].join(',');
 
@@ -89,6 +90,8 @@ function mapPlace(p) {
     description: p.editorialSummary?.text || null,
     businessStatus: p.businessStatus || 'OPERATIONAL',
     mapsUrl: p.googleMapsUri || null,
+    lat: p.location?.latitude ?? null,
+    lng: p.location?.longitude ?? null,
   };
 }
 

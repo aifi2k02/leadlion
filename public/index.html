@@ -3,31 +3,198 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LeadLion — Local Business Lead Finder</title>
-  <meta name="description" content="Find, score and close local business leads. GMB audits, branded reports and outreach scripts in one click.">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦁</text></svg>">
-  <link rel="stylesheet" href="/styles.css">
+  <title>LeadLion — Find & Close Local Business Leads on Autopilot</title>
+  <meta name="description" content="Search any niche in any city, get every business scored by sales opportunity, generate branded audit reports, and close them over WhatsApp. The modern LeadsGorilla alternative.">
+  <link rel="icon" href="/logo.svg">
+  <link rel="apple-touch-icon" href="/logo.svg">
+  <meta name="theme-color" content="#0e1116">
+  <meta property="og:title" content="LeadLion — Find & Close Local Business Leads">
+  <meta property="og:description" content="Scored leads, branded audit reports, and one-click WhatsApp outreach.">
+  <style>
+    :root{
+      --bg:#0e1116;--panel:#161b23;--card:#1c2330;--border:#2a3446;
+      --text:#e8edf5;--dim:#94a3b8;--accent:#f5a623;--accent2:#d97706;
+      --green:#34d399;--red:#f87171;
+    }
+    *{margin:0;padding:0;box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;-webkit-font-smoothing:antialiased}
+    a{color:inherit;text-decoration:none}
+    .wrap{max-width:1140px;margin:0 auto;padding:0 22px}
+    .btn{display:inline-block;background:var(--accent);color:#1a1205;font-weight:700;padding:13px 26px;border-radius:10px;font-size:15px;transition:transform .15s,background .15s}
+    .btn:hover{background:var(--accent2);transform:translateY(-1px)}
+    .btn-lg{padding:16px 34px;font-size:17px}
+    .btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
+    .btn-ghost:hover{background:var(--card);transform:none}
+
+    /* nav */
+    nav{position:sticky;top:0;z-index:50;background:rgba(14,17,22,.82);backdrop-filter:blur(12px);border-bottom:1px solid var(--border)}
+    nav .wrap{display:flex;align-items:center;justify-content:space-between;height:66px}
+    .logo{display:flex;align-items:center;gap:10px;font-size:21px;font-weight:700;letter-spacing:-.4px}
+    .logo img{border-radius:9px}
+    .logo b{color:var(--accent)}
+    .nav-links{display:flex;align-items:center;gap:26px;font-size:14.5px;color:var(--dim)}
+    .nav-links a:hover{color:var(--text)}
+    @media(max-width:720px){.nav-links a:not(.btn){display:none}}
+
+    /* hero */
+    .hero{text-align:center;padding:90px 0 70px;position:relative;overflow:hidden}
+    .hero::before{content:"";position:absolute;top:-30%;left:50%;transform:translateX(-50%);width:800px;height:600px;background:radial-gradient(circle,rgba(245,166,35,.14),transparent 62%);pointer-events:none}
+    .pill{display:inline-block;background:var(--card);border:1px solid var(--border);color:var(--accent);font-size:13px;font-weight:600;padding:6px 15px;border-radius:30px;margin-bottom:26px}
+    .hero h1{font-size:clamp(34px,6vw,60px);line-height:1.08;letter-spacing:-1.5px;font-weight:800;max-width:900px;margin:0 auto 22px}
+    .hero h1 .grad{background:linear-gradient(120deg,var(--accent),#fcd34d);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .hero p.sub{font-size:clamp(16px,2.4vw,20px);color:var(--dim);max-width:640px;margin:0 auto 34px}
+    .hero-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+    .hero .note{margin-top:16px;font-size:13px;color:var(--dim)}
+
+    /* mockup */
+    .mock{max-width:960px;margin:56px auto 0;border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.5);background:var(--panel)}
+    .mock-bar{display:flex;gap:7px;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--border)}
+    .mock-bar i{width:11px;height:11px;border-radius:50%;background:#3a4658}
+    .mock-body{display:grid;grid-template-columns:1fr 1fr;gap:2px;background:var(--border)}
+    .mock-row{background:var(--panel);padding:15px 18px;display:flex;align-items:center;gap:14px}
+    .mock-score{min-width:44px;height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px}
+    .mock-info{flex:1;min-width:0}
+    .mock-info b{font-size:14px}
+    .mock-info span{display:block;font-size:12px;color:var(--dim)}
+    .mock-badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px}
+    @media(max-width:640px){.mock-body{grid-template-columns:1fr}.mock-row:nth-child(n+5){display:none}}
+
+    /* stats strip */
+    .strip{display:flex;justify-content:center;gap:60px;flex-wrap:wrap;padding:46px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);text-align:center}
+    .strip .n{font-size:32px;font-weight:800;color:var(--accent)}
+    .strip .l{font-size:13px;color:var(--dim)}
+
+    /* sections */
+    section.blk{padding:82px 0}
+    .eyebrow{color:var(--accent);font-weight:700;font-size:13px;letter-spacing:1px;text-transform:uppercase;text-align:center}
+    h2.title{font-size:clamp(28px,4vw,40px);font-weight:800;letter-spacing:-1px;text-align:center;margin:10px auto 14px;max-width:720px}
+    .lead{text-align:center;color:var(--dim);max-width:600px;margin:0 auto 52px;font-size:17px}
+
+    .features{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}
+    .feat{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:26px;transition:border-color .2s,transform .2s}
+    .feat:hover{border-color:var(--accent);transform:translateY(-3px)}
+    .feat .ico{font-size:26px;margin-bottom:14px}
+    .feat h3{font-size:18px;margin-bottom:8px}
+    .feat p{color:var(--dim);font-size:14.5px}
+
+    /* steps */
+    .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:24px;counter-reset:s}
+    .step{position:relative;padding:26px;background:var(--panel);border:1px solid var(--border);border-radius:14px}
+    .step::before{counter-increment:s;content:counter(s);position:absolute;top:-16px;left:24px;width:34px;height:34px;background:var(--accent);color:#1a1205;font-weight:800;border-radius:9px;display:flex;align-items:center;justify-content:center}
+    .step h3{margin:12px 0 8px;font-size:18px}
+    .step p{color:var(--dim);font-size:14.5px}
+
+    /* compare */
+    .compare{max-width:640px;margin:0 auto;border:1px solid var(--border);border-radius:14px;overflow:hidden}
+    .compare .crow{display:grid;grid-template-columns:1.6fr 1fr 1fr}
+    .compare .crow>div{padding:14px 18px;border-bottom:1px solid var(--border);font-size:14.5px}
+    .compare .chead{background:var(--card);font-weight:700}
+    .compare .chead .hl{color:var(--accent)}
+    .compare .crow>div:first-child{color:var(--dim)}
+    .compare .yes{color:var(--green);font-weight:700}
+    .compare .no{color:var(--red)}
+
+    /* final cta */
+    .final{text-align:center;background:linear-gradient(160deg,var(--card),var(--panel));border:1px solid var(--border);border-radius:20px;padding:60px 30px;margin:0 22px}
+    .final h2{font-size:clamp(26px,4vw,38px);font-weight:800;letter-spacing:-1px;margin-bottom:14px}
+    .final p{color:var(--dim);margin-bottom:28px;font-size:17px}
+
+    footer{border-top:1px solid var(--border);padding:34px 0;color:var(--dim);font-size:13.5px}
+    footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:14px}
+  </style>
 </head>
 <body>
-  <div id="app">
-    <aside class="sidebar" id="sidebar">
-      <div class="logo">🦁 <span>Lead<b>Lion</b></span></div>
-      <nav>
-        <a href="#/dashboard" data-nav="dashboard">📊 Dashboard</a>
-        <a href="#/find" data-nav="find">🔍 Find Leads</a>
-        <a href="#/leads" data-nav="leads">📁 My Leads</a>
-        <a href="#/settings" data-nav="settings">⚙️ Settings</a>
-      </nav>
-      <div class="sidebar-foot">
-        <div id="storage-badge" class="badge badge-muted">Local storage</div>
+  <nav><div class="wrap">
+    <a class="logo" href="/"><img src="/logo.svg" width="32" height="32" alt="">Lead<b>Lion</b></a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#compare">vs LeadsGorilla</a>
+      <a class="btn" href="/app">Launch App →</a>
+    </div>
+  </div></nav>
+
+  <header class="hero"><div class="wrap">
+    <span class="pill">🦁 The modern local lead-gen platform</span>
+    <h1>Find local businesses that <span class="grad">need you</span> — and close them.</h1>
+    <p class="sub">Search any niche in any city. LeadLion scores every business by sales opportunity, audits their Google listing & website, and hands you the report and WhatsApp message to win the deal.</p>
+    <div class="hero-cta">
+      <a class="btn btn-lg" href="/app">Start finding leads free →</a>
+      <a class="btn btn-lg btn-ghost" href="#how">See how it works</a>
+    </div>
+    <p class="note">No credit card. Works instantly with demo data · Add a free Google key for live results.</p>
+
+    <div class="mock">
+      <div class="mock-bar"><i></i><i></i><i></i></div>
+      <div class="mock-body">
+        <div class="mock-row"><div class="mock-score" style="background:rgba(248,113,113,.18);color:#f87171">88</div><div class="mock-info"><b>Corner Barbershop</b><span>No website · 2 reviews</span></div><span class="mock-badge" style="background:rgba(248,113,113,.15);color:#f87171">Grade F</span></div>
+        <div class="mock-row"><div class="mock-score" style="background:rgba(248,113,113,.18);color:#f87171">71</div><div class="mock-info"><b>Elite Auto Repair</b><span>Dead website · unclaimed</span></div><span class="mock-badge" style="background:rgba(248,113,113,.15);color:#f87171">Grade F</span></div>
+        <div class="mock-row"><div class="mock-score" style="background:rgba(251,191,36,.18);color:#fbbf24">54</div><div class="mock-info"><b>Bloom Florist</b><span>Slow site · few photos</span></div><span class="mock-badge" style="background:rgba(251,191,36,.15);color:#fbbf24">Grade C</span></div>
+        <div class="mock-row"><div class="mock-score" style="background:rgba(251,191,36,.18);color:#fbbf24">47</div><div class="mock-info"><b>Sunrise Dental</b><span>No booking · thin content</span></div><span class="mock-badge" style="background:rgba(251,191,36,.15);color:#fbbf24">Grade C</span></div>
+        <div class="mock-row"><div class="mock-score" style="background:rgba(52,211,153,.18);color:#34d399">18</div><div class="mock-info"><b>Prime Fitness Studio</b><span>Strong presence</span></div><span class="mock-badge" style="background:rgba(52,211,153,.15);color:#34d399">Grade A</span></div>
+        <div class="mock-row"><div class="mock-score" style="background:rgba(52,211,153,.18);color:#34d399">12</div><div class="mock-info"><b>Metro Law Group</b><span>Well optimized</span></div><span class="mock-badge" style="background:rgba(52,211,153,.15);color:#34d399">Grade A</span></div>
       </div>
-    </aside>
-    <main id="main"></main>
+    </div>
+  </div></header>
+
+  <div class="strip wrap" style="border-radius:0">
+    <div><div class="n">150+</div><div class="l">leads per city search</div></div>
+    <div><div class="n">23</div><div class="l">audit checks per business</div></div>
+    <div><div class="n">$0</div><div class="l">/month to run</div></div>
+    <div><div class="n">1-click</div><div class="l">WhatsApp outreach</div></div>
   </div>
 
-  <div id="modal-root"></div>
-  <div id="toast-root"></div>
+  <section class="blk" id="features"><div class="wrap">
+    <p class="eyebrow">Everything you need</p>
+    <h2 class="title">One tool from finding leads to closing them</h2>
+    <p class="lead">Most tools stop at a list. LeadLion takes you all the way to a signed client.</p>
+    <div class="features">
+      <div class="feat"><div class="ico">🔍</div><h3>Deep city search</h3><p>Tile any city into zones and pull <b>hundreds</b> of businesses — far past Google's 60-result cap. Every one scored by opportunity.</p></div>
+      <div class="feat"><div class="ico">🩺</div><h3>Google + website audits</h3><p>23 explainable checks across their listing, website, and real mobile speed (Google Lighthouse). Every gap comes with a sales pitch.</p></div>
+      <div class="feat"><div class="ico">📊</div><h3>Competitor benchmarking</h3><p>"You're #56 of 151 — competitors average 480 reviews, you have 48." Undeniable urgency, straight from live data.</p></div>
+      <div class="feat"><div class="ico">📄</div><h3>Branded reports + tracking</h3><p>Publish a shareable report link under <b>your</b> brand — and get notified the moment the prospect opens it. That's your cue to call.</p></div>
+      <div class="feat"><div class="ico">💬</div><h3>1-click WhatsApp outreach</h3><p>Every message is pre-written from that business's real audit findings. Open WhatsApp, send, done.</p></div>
+      <div class="feat"><div class="ico">🗂️</div><h3>Built-in CRM & pipeline</h3><p>Save leads, move them New → Won, track opens, export CSV. A map view and dashboard keep the whole hunt in view.</p></div>
+    </div>
+  </div></section>
 
-  <script type="module" src="/app.js"></script>
+  <section class="blk" id="how" style="background:var(--panel);border-top:1px solid var(--border);border-bottom:1px solid var(--border)"><div class="wrap">
+    <p class="eyebrow">Dead simple</p>
+    <h2 class="title">From search to signed in four steps</h2>
+    <p class="lead">The whole workflow lives in one screen.</p>
+    <div class="steps">
+      <div class="step"><h3>Search a market</h3><p>Type a niche and city. Get up to 150+ businesses, each scored by how badly they need help.</p></div>
+      <div class="step"><h3>Audit in one click</h3><p>See exactly what's broken on their listing, website, and mobile speed — with the pitch to fix it.</p></div>
+      <div class="step"><h3>Send the report</h3><p>Publish a branded audit link and WhatsApp it. Watch for the "opened" ping.</p></div>
+      <div class="step"><h3>Close the deal</h3><p>Follow up while you're top of mind. Move them to "Won" and repeat.</p></div>
+    </div>
+  </div></section>
+
+  <section class="blk" id="compare"><div class="wrap">
+    <p class="eyebrow">Why switch</p>
+    <h2 class="title">Everything they do, plus what they don't</h2>
+    <div class="compare">
+      <div class="crow chead"><div>Feature</div><div class="hl">LeadLion</div><div>Others</div></div>
+      <div class="crow"><div>Monthly cost</div><div class="yes">$0</div><div class="no">$49–99</div></div>
+      <div class="crow"><div>Leads per search</div><div class="yes">150+</div><div>~20–50</div></div>
+      <div class="crow"><div>Real mobile speed audit</div><div class="yes">✓</div><div class="no">✗</div></div>
+      <div class="crow"><div>Competitor benchmarking</div><div class="yes">✓</div><div class="no">✗</div></div>
+      <div class="crow"><div>Report open-tracking</div><div class="yes">✓</div><div class="no">✗</div></div>
+      <div class="crow"><div>1-click WhatsApp outreach</div><div class="yes">✓</div><div class="no">✗</div></div>
+      <div class="crow"><div>Your data, your infrastructure</div><div class="yes">✓</div><div class="no">✗</div></div>
+    </div>
+  </div></section>
+
+  <section class="blk"><div class="final">
+    <h2>Your next 100 clients are one search away.</h2>
+    <p>Open LeadLion, search your city, and find the businesses quietly losing customers today.</p>
+    <a class="btn btn-lg" href="/app">Launch LeadLion free →</a>
+  </div></section>
+
+  <footer><div class="wrap">
+    <div class="logo" style="font-size:18px"><img src="/logo.svg" width="26" height="26" alt="">Lead<b>Lion</b></div>
+    <div>© 2026 LeadLion · Built for local marketing agencies.</div>
+  </div></footer>
 </body>
 </html>

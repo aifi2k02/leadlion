@@ -207,6 +207,7 @@ const routes = {
   dashboard: viewDashboard,
   find: viewFind,
   leads: viewLeads,
+  map: viewMap,
   settings: viewSettings,
   report: viewReport,
 };
@@ -223,9 +224,50 @@ async function render() {
 }
 
 // -------- dashboard
+const PIPE_COLORS = { new: '#60a5fa', contacted: '#fbbf24', meeting: '#a78bfa', won: '#34d399', lost: '#f87171' };
+
+function funnelChart(leads) {
+  const max = Math.max(1, ...STATUSES.map((st) => leads.filter((l) => (l.status || 'new') === st).length));
+  return `<div class="chart-card"><h3>Pipeline</h3>
+    ${STATUSES.map((st) => {
+      const n = leads.filter((l) => (l.status || 'new') === st).length;
+      return `<div class="funnel-row"><span class="fl">${STATUS_LABEL[st]}</span>
+        <div class="funnel-bar" style="width:${(n / max) * 100}%;background:${PIPE_COLORS[st]}">${n || ''}</div></div>`;
+    }).join('')}
+  </div>`;
+}
+
+function opportunityChart(leads) {
+  const hot = leads.filter((l) => combinedOpp(l) >= 55).length;
+  const warm = leads.filter((l) => { const o = combinedOpp(l); return o >= 30 && o < 55; }).length;
+  const cold = leads.filter((l) => combinedOpp(l) < 30).length;
+  const max = Math.max(1, hot, warm, cold);
+  const bar = (label, n, color) => `<div class="funnel-row"><span class="fl">${label}</span><div class="funnel-bar" style="width:${(n / max) * 100}%;background:${color}">${n || ''}</div></div>`;
+  return `<div class="chart-card"><h3>Opportunity spread</h3>
+    ${bar('🔥 Hot', hot, '#f87171')}${bar('☀️ Warm', warm, '#fbbf24')}${bar('❄️ Cold', cold, '#34d399')}
+  </div>`;
+}
+
+function activityChart(leads) {
+  // leads saved per day over the last 7 days
+  const days = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now); d.setDate(now.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    const n = leads.filter((l) => (l.savedAt || '').slice(0, 10) === key).length;
+    days.push({ label: d.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 2), n });
+  }
+  const max = Math.max(1, ...days.map((d) => d.n));
+  return `<div class="chart-card"><h3>Leads saved (7 days)</h3>
+    <div class="spark">${days.map((d) => `<div style="height:${Math.max(2, (d.n / max) * 100)}%">${d.n ? `<span>${d.n}</span>` : ''}</div>`).join('')}</div>
+    <div class="spark-labels">${days.map((d) => `<div>${d.label}</div>`).join('')}</div>
+  </div>`;
+}
+
 async function viewDashboard() {
   const leads = await store.list();
-  const avgOpp = leads.length ? Math.round(leads.reduce((a, l) => a + l.opportunityScore, 0) / leads.length) : 0;
+  const avgOpp = leads.length ? Math.round(leads.reduce((a, l) => a + combinedOpp(l), 0) / leads.length) : 0;
   const won = leads.filter((l) => l.status === 'won').length;
   const active = leads.filter((l) => ['contacted', 'meeting'].includes(l.status)).length;
   const recent = leads.slice(0, 6);
@@ -245,6 +287,11 @@ async function viewDashboard() {
         <p class="muted mb">Search any niche + city. LeadLion scores every business by how badly they need your help — then generates the audit report and outreach script to close them.</p>
         <a class="btn" href="#/find">🔍 Find leads now</a>
       </div>` : `
+      <div class="grid mb" style="grid-template-columns:repeat(auto-fit,minmax(250px,1fr))">
+        ${funnelChart(leads)}
+        ${opportunityChart(leads)}
+        ${activityChart(leads)}
+      </div>
       <h2>Recent leads</h2>
       <div class="table-wrap">${leadsTable(recent)}</div>`}
   `;
@@ -772,6 +819,66 @@ async function viewLeads() {
   if (csvBtn) csvBtn.onclick = () => exportCsv(leads, 'leadlion-pipeline');
 }
 
+// -------- map (saved leads plotted; Leaflet lazy-loaded)
+let leafletLoading = null;
+function loadLeaflet() {
+  if (window.L) return Promise.resolve();
+  if (leafletLoading) return leafletLoading;
+  leafletLoading = new Promise((resolve, reject) => {
+    const css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(css);
+    const js = document.createElement('script');
+    js.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    js.onload = resolve;
+    js.onerror = reject;
+    document.head.appendChild(js);
+  });
+  return leafletLoading;
+}
+
+async function viewMap() {
+  const leads = (await store.list()).filter((l) => l.lat && l.lng);
+  const total = (await store.list()).length;
+  $('#main').innerHTML = `
+    <h1>Map</h1>
+    <p class="subtitle">Your saved leads by location — color-coded by opportunity (red = hot).</p>
+    ${leads.length === 0 ? `<div class="card muted">${total ? 'Your saved leads were found before map support was added. Re-search and save leads to see them here.' : 'No saved leads yet. <a href="#/find" style="color:var(--accent)">Find some →</a>'}</div>`
+      : `<div class="flex mb" style="gap:14px;font-size:13px">
+           <span><span class="dot" style="background:#f87171"></span> Hot (55+)</span>
+           <span><span class="dot" style="background:#fbbf24"></span> Warm (30-54)</span>
+           <span><span class="dot" style="background:#34d399"></span> Cold (&lt;30)</span>
+           <span class="muted">· ${leads.length} plotted</span>
+         </div>
+         <div id="map"></div>`}
+  `;
+  if (!leads.length) return;
+  try {
+    await loadLeaflet();
+  } catch {
+    $('#map').outerHTML = '<div class="card muted">Could not load the map library (offline?).</div>';
+    return;
+  }
+  const map = L.map('map').setView([leads[0].lat, leads[0].lng], 12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap', maxZoom: 19,
+  }).addTo(map);
+  const bounds = [];
+  for (const l of leads) {
+    const opp = combinedOpp(l);
+    const color = opp >= 55 ? '#f87171' : opp >= 30 ? '#fbbf24' : '#34d399';
+    const marker = L.circleMarker([l.lat, l.lng], { radius: 9, fillColor: color, color: '#0e1116', weight: 2, fillOpacity: 0.9 }).addTo(map);
+    marker.bindPopup(`<b>${esc(l.name)}</b><br>Opportunity: ${opp}${l.website ? '' : ' · no website'}<br><a href="#" data-mapid="${esc(l.id)}">Open lead →</a>`);
+    bounds.push([l.lat, l.lng]);
+  }
+  if (bounds.length > 1) map.fitBounds(bounds, { padding: [40, 40] });
+  map.on('popupopen', (e) => {
+    const link = e.popup.getElement().querySelector('[data-mapid]');
+    if (link) link.onclick = async (ev) => { ev.preventDefault(); openLeadModal(await store.get(link.dataset.mapid)); };
+  });
+}
+
 // -------- report
 async function viewReport(id) {
   const lead = await store.get(decodeURIComponent(id || ''));
@@ -1069,3 +1176,8 @@ function updateStorageBadge(supaOk) {
 
 window.addEventListener('hashchange', render);
 initSupabase().then(updateStorageBadge).then(render);
+
+// PWA: register service worker for installability + offline shell
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
