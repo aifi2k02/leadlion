@@ -1,30 +1,60 @@
 <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="LeadLion">
   <defs>
-    <linearGradient id="ll-gold" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#fcd34d"/>
-      <stop offset="1" stop-color="#e08a08"/>
+    <linearGradient id="mane" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#fbbf24"/>
+      <stop offset="1" stop-color="#c2410c"/>
+    </linearGradient>
+    <linearGradient id="maneBack" x1="0" y1="0" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#b45309"/>
+      <stop offset="1" stop-color="#7c2d12"/>
+    </linearGradient>
+    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fef3c7"/>
+      <stop offset="1" stop-color="#fcd34d"/>
     </linearGradient>
   </defs>
-  <!-- ground shadow -->
-  <ellipse cx="32" cy="61.5" rx="7" ry="1.6" fill="#000" opacity="0.18"/>
-  <!-- map pin -->
-  <path d="M32 3 C17.6 3 6 14.6 6 29 C6 46 32 61 32 61 C32 61 58 46 58 29 C58 14.6 46.4 3 32 3 Z" fill="url(#ll-gold)"/>
-  <!-- lion mane (spiky burst) -->
-  <path d="M32 5 L36.3 11.7 L43.8 8.8 L43.3 16.8 L51 18.8 L46 25 L51 31.2 L43.3 33.2 L43.8 41.2 L36.3 38.3 L32 45 L27.7 38.3 L20.2 41.2 L20.7 33.2 L13 31.2 L18 25 L13 18.8 L20.7 16.8 L20.2 8.8 L27.7 11.7 Z" fill="#1a1205"/>
-  <!-- ears -->
-  <circle cx="23.5" cy="16.5" r="3.4" fill="#1a1205"/>
-  <circle cx="40.5" cy="16.5" r="3.4" fill="#1a1205"/>
+
+  <!-- back mane layer (rotated half-step for depth) -->
+  <g transform="rotate(15.0 32 30)">
+    <path d="M27.47,13.11 Q31.64,4.65 36.39,2.79 Q38.15,12.51 36.53,13.11 Q44.05,8.43 48.96,9.18 Q46.07,17.93 44.37,17.63 Q51.90,18.13 55.54,21.04 Q50.22,26.58 48.89,25.47 Q56.33,29.65 58.11,34.21 Q49.49,36.15 48.89,34.53 Q53.80,42.17 53.04,47.14 Q44.07,44.07 44.37,42.37 Q44.16,50.39 41.18,54.12 Q35.42,48.22 36.53,46.89 Q32.39,57.24 27.28,59.23 Q25.85,47.49 27.47,46.89 Q19.07,53.15 13.80,52.34 Q17.93,42.07 19.63,42.37 Q12.81,41.45 9.30,38.64 Q13.78,33.42 15.11,34.53 Q8.09,30.34 6.34,25.86 Q14.51,23.85 15.11,25.47 Q8.82,17.05 9.63,11.77 Q19.93,15.93 19.63,17.63 Q21.01,11.57 23.71,8.20 Q28.58,11.78 27.47,13.11 Z" fill="url(#maneBack)"/>
+  </g>
+  <!-- main mane -->
+  <path d="M27.73,14.06 Q31.66,6.08 36.14,4.33 Q37.80,13.50 36.27,14.06 Q43.37,9.65 48.00,10.36 Q45.27,18.61 43.67,18.33 Q50.77,18.80 54.20,21.55 Q49.19,26.77 47.94,25.73 Q54.96,29.67 56.64,33.98 Q48.50,35.80 47.94,34.27 Q52.56,41.48 51.85,46.17 Q43.39,43.27 43.67,41.67 Q43.47,49.23 40.66,52.75 Q35.23,47.19 36.27,45.94 Q32.36,55.01 27.67,56.84 Q26.20,46.50 27.73,45.94 Q19.80,51.84 14.83,51.08 Q18.73,41.39 20.33,41.67 Q13.90,40.80 10.59,38.15 Q14.81,33.23 16.06,34.27 Q9.44,30.32 7.79,26.09 Q15.50,24.20 16.06,25.73 Q10.13,17.79 10.89,12.81 Q20.61,16.73 20.33,18.33 Q21.63,12.62 24.18,9.44 Q28.77,12.81 27.73,14.06 Z" fill="url(#mane)"/>
+
   <!-- face -->
-  <circle cx="32" cy="26" r="12.4" fill="#fef3c7"/>
-  <!-- brows -->
-  <path d="M24.5 21.5 Q27.5 20 30 22" stroke="#1a1205" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-  <path d="M39.5 21.5 Q36.5 20 34 22" stroke="#1a1205" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-  <!-- eyes -->
-  <circle cx="27" cy="25" r="2.2" fill="#1a1205"/>
-  <circle cx="37" cy="25" r="2.2" fill="#1a1205"/>
-  <!-- muzzle + nose -->
-  <path d="M32 29.5 L35 32.5 Q32 35 29 32.5 Z" fill="#c2410c"/>
-  <path d="M32 34 L32 36" stroke="#1a1205" stroke-width="1.4" stroke-linecap="round"/>
-  <path d="M32 36 Q28.5 38.5 26 36.5" stroke="#1a1205" stroke-width="1.4" fill="none" stroke-linecap="round"/>
-  <path d="M32 36 Q35.5 38.5 38 36.5" stroke="#1a1205" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+  <path d="M32 17.2
+           C39.2 17.2 44.4 22.2 44.4 29.2
+           C44.4 36.8 39 42.6 32 42.6
+           C25 42.6 19.6 36.8 19.6 29.2
+           C19.6 22.2 24.8 17.2 32 17.2 Z" fill="url(#face)"/>
+
+  <!-- brows (confident, low) -->
+  <path d="M24.2 25.6 Q27.0 23.6 30.2 25.0" stroke="#451a03" stroke-width="2.1" fill="none" stroke-linecap="round"/>
+  <path d="M39.8 25.6 Q37.0 23.6 33.8 25.0" stroke="#451a03" stroke-width="2.1" fill="none" stroke-linecap="round"/>
+
+  <!-- eyes (almond, slight tilt) -->
+  <g fill="#292018">
+    <ellipse cx="27.1" cy="28.7" rx="2.4" ry="2.6" transform="rotate(-8 27.1 28.7)"/>
+    <ellipse cx="36.9" cy="28.7" rx="2.4" ry="2.6" transform="rotate(8 36.9 28.7)"/>
+  </g>
+  <circle cx="27.8" cy="27.9" r="0.6" fill="#fff"/>
+  <circle cx="37.6" cy="27.9" r="0.6" fill="#fff"/>
+
+  <!-- muzzle cheeks -->
+  <circle cx="28.5" cy="37.0" r="3.8" fill="#fffbeb"/>
+  <circle cx="35.5" cy="37.0" r="3.8" fill="#fffbeb"/>
+
+  <!-- nose = subtle map pin (local-leads nod) -->
+  <path d="M32 31.0 C29.9 31.0 28.5 32.3 28.5 34.0 C28.5 36.2 32 39.2 32 39.2 C32 39.2 35.5 36.2 35.5 34.0 C35.5 32.3 34.1 31.0 32 31.0 Z" fill="#9a3412"/>
+  <circle cx="32" cy="33.8" r="1.1" fill="#fef3c7"/>
+
+  <!-- mouth -->
+  <path d="M32 39.2 Q29.6 41.4 27.4 40.3" stroke="#78350f" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  <path d="M32 39.2 Q34.4 41.4 36.6 40.3" stroke="#78350f" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+
+  <!-- whisker dots -->
+  <g fill="#d97706" opacity="0.85">
+    <circle cx="26.6" cy="36.2" r="0.6"/><circle cx="25.9" cy="38.0" r="0.6"/>
+    <circle cx="37.4" cy="36.2" r="0.6"/><circle cx="38.1" cy="38.0" r="0.6"/>
+  </g>
 </svg>
