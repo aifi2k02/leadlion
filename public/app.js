@@ -168,7 +168,7 @@ Objection — "not interested":
   // WhatsApp — short, warm, mobile-first. Two issues max, ends with a soft ask.
   const wIssues = topIssues.slice(0, 2).map((i) => `• ${i.text}`).join('\n');
   const greet = s.waGreeting || 'Hello';
-  const whatsapp = `${greet}! I came across ${lead.name} on Google while searching "${lead.keyword}" in ${lead.location}. 👋
+  const whatsapp = `${greet}! I came across ${lead.name} on Google while searching "${lead.keyword}" in ${lead.location}.
 
 I did a quick check of your online presence and noticed a couple of things that may be sending customers to competitors:
 ${wIssues}
