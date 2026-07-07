@@ -35,7 +35,7 @@
     .b-red{background:rgba(248,113,113,.15);color:var(--red)}
     .muted{color:var(--dim);font-size:13px}
     .err{color:var(--red);font-size:13px;margin-top:8px}
-    #app{display:none}
+    #ll-admin-panel{display:none}
     .toast{position:fixed;bottom:20px;right:20px;background:var(--card);border:1px solid var(--accent);border-radius:10px;padding:12px 18px}
   </style>
 </head>
@@ -43,16 +43,16 @@
   <div class="wrap">
     <div class="logo"><img src="/logo.png" width="34" height="34" alt=""><span>Lead<b>Lion</b></span> <span style="font-size:14px;color:var(--dim);font-weight:400">· Admin</span></div>
 
-    <div id="login" class="card" style="max-width:400px">
+    <div id="ll-admin-auth" class="card" style="max-width:400px">
       <h2>Admin login</h2>
       <label>Admin password</label>
       <input id="pw" type="password" placeholder="••••••••">
-      <button class="btn" id="login-btn" style="width:100%;margin-top:12px">Log in</button>
-      <div class="err" id="login-err"></div>
+      <button class="btn" id="ll-auth-btn" style="width:100%;margin-top:12px">Log in</button>
+      <div class="err" id="ll-auth-err"></div>
       <p class="muted" style="margin-top:12px">Set the <code>ADMIN_PASSWORD</code> secret in Cloudflare Pages → Settings → Variables and Secrets, then redeploy.</p>
     </div>
 
-    <div id="app">
+    <div id="ll-admin-panel">
       <div class="card">
         <h2>Create a trial account</h2>
         <div class="row">
@@ -84,15 +84,15 @@
     const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     function toast(m) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = m; document.body.appendChild(t); setTimeout(() => t.remove(), 2500); }
 
-    $('#login-btn').onclick = async () => {
+    $('#ll-auth-btn').onclick = async () => {
       PW = $('#pw').value;
       const { ok, d } = await api({ action: 'list' });
-      if (!ok) { $('#login-err').textContent = d.error || 'Login failed'; return; }
-      $('#login').style.display = 'none';
-      $('#app').style.display = '';
+      if (!ok) { $('#ll-auth-err').textContent = d.error || 'Login failed'; return; }
+      $('#ll-admin-auth').style.display = 'none';
+      $('#ll-admin-panel').style.display = '';
       render(d.accounts);
     };
-    $('#pw').onkeydown = (e) => { if (e.key === 'Enter') $('#login-btn').click(); };
+    $('#pw').onkeydown = (e) => { if (e.key === 'Enter') $('#ll-auth-btn').click(); };
 
     $('#refresh').onclick = load;
     async function load() { const { ok, d } = await api({ action: 'list' }); if (ok) render(d.accounts); }
