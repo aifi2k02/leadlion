@@ -28,6 +28,16 @@ function feat() { return SESSION?.profile?.features || { deep: false, download: 
 function isDemo() { return !SESSION || SESSION.profile?.type === 'demo'; }
 function isTrial() { return SESSION?.profile?.type === 'trial'; }
 
+// Each session type gets its own lead store so a trial/demo never sees or
+// touches the owner's pipeline. Supabase sync is owner-only.
+function leadsKey() {
+  const t = SESSION?.profile?.type;
+  if (t === 'trial') return 'leadlion_leads__trial';
+  if (t === 'demo') return 'leadlion_leads__demo';
+  return 'leadlion_leads';
+}
+function dbActive() { return !!supabase && SESSION?.profile?.type === 'full'; }
+
 // ---------------------------------------------------------------- storage
 // Same interface for localStorage and Supabase so views don't care which.
 const LEADS_KEY = 'leadlion_leads';
@@ -52,13 +62,13 @@ async function initSupabase() {
 
 const store = {
   local() {
-    try { return JSON.parse(localStorage.getItem(LEADS_KEY)) || []; }
+    try { return JSON.parse(localStorage.getItem(leadsKey())) || []; }
     catch { return []; }
   },
-  writeLocal(leads) { localStorage.setItem(LEADS_KEY, JSON.stringify(leads)); },
+  writeLocal(leads) { localStorage.setItem(leadsKey(), JSON.stringify(leads)); },
 
   async list() {
-    if (supabase) {
+    if (dbActive()) {
       const { data, error } = await supabase.from('leads').select('*').order('created_at', { ascending: false });
       if (error) { toast('Supabase read failed — using local'); return this.local(); }
       return data.map((r) => ({ ...r.data, id: r.id, status: r.status, notes: r.notes || '' }));
@@ -68,7 +78,7 @@ const store = {
 
   async save(lead) {
     const record = { ...lead, id: lead.placeId, status: lead.status || 'new', notes: lead.notes || '', savedAt: new Date().toISOString() };
-    if (supabase) {
+    if (dbActive()) {
       const { error } = await supabase.from('leads').upsert({ id: record.id, status: record.status, notes: record.notes, data: record });
       if (error) { toast('Supabase save failed: ' + error.message); return null; }
       return record;
@@ -80,7 +90,7 @@ const store = {
   },
 
   async update(id, patch) {
-    if (supabase) {
+    if (dbActive()) {
       const leads = await this.list();
       const lead = leads.find((l) => l.id === id);
       if (!lead) return;
@@ -97,7 +107,7 @@ const store = {
   },
 
   async remove(id) {
-    if (supabase) { await supabase.from('leads').delete().eq('id', id); return; }
+    if (dbActive()) { await supabase.from('leads').delete().eq('id', id); return; }
     this.writeLocal(this.local().filter((l) => l.id !== id));
   },
 
