@@ -229,6 +229,10 @@ async function viewFind() {
         <div class="field"><label>Location</label><input id="loc" placeholder="e.g. Austin TX, Manchester UK" value="${esc(lastSearch?.location || '')}"></div>
         <button id="go">Search</button>
       </div>
+      <label class="flex" style="margin-top:12px;cursor:pointer;font-size:13.5px;color:var(--text)">
+        <input type="checkbox" id="deep" style="width:auto;margin:0" ${lastSearch?.deep ? 'checked' : ''}>
+        <span>🌆 <b>Deep search</b> — scan the whole city grid for hundreds of leads (slower, ~20-40s). Off = fast top 60.</span>
+      </label>
       ${!s.googleApiKey ? `<p class="muted mt" style="font-size:13px">💡 No Google API key set — you'll get realistic <b>demo data</b>. Add your free key in <a href="#/settings" style="color:var(--accent)">Settings</a> for live results.</p>` : ''}
     </div>
     <div id="results"></div>
@@ -242,18 +246,20 @@ async function runSearch() {
   const keyword = $('#kw').value.trim();
   const location = $('#loc').value.trim();
   if (!keyword || !location) return toast('Enter both a keyword and a location');
+  const deep = $('#deep')?.checked;
   const btn = $('#go');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>';
+  btn.innerHTML = deep ? '<span class="spinner"></span> Scanning city…' : '<span class="spinner"></span>';
+  if (deep) toast('Deep search scanning the whole city — this takes 20-40s…');
   try {
     const res = await fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keyword, location, apiKey: getSettings().googleApiKey || undefined }),
+      body: JSON.stringify({ keyword, location, deep, apiKey: getSettings().googleApiKey || undefined }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Search failed');
-    lastSearch = { keyword, location, mode: data.mode, results: data.results, filters: {} };
+    lastSearch = { keyword, location, mode: data.mode, deep: data.deep, cells: data.cells, results: data.results, filters: {} };
     renderResults(lastSearch);
   } catch (e) {
     toast('Search error: ' + e.message);
@@ -320,7 +326,7 @@ function renderResults(search) {
   const auditable = search.results.filter((r) => r.website && !r.webAudit).length;
   const audited = search.results.filter((r) => r.webAudit).length;
   $('#results').innerHTML = `
-    ${search.mode === 'demo' ? `<div class="banner banner-warn mt">🧪 Demo data (deterministic sample). Add your Google Places API key in Settings for live business data.</div>` : `<div class="banner banner-info mt">📡 Live Google data.</div>`}
+    ${search.mode === 'demo' ? `<div class="banner banner-warn mt">🧪 Demo data (deterministic sample). Add your Google Places API key in Settings for live business data.</div>` : search.deep ? `<div class="banner banner-info mt">🌆 Deep search — scanned ${search.cells || 16} zones across ${esc(search.location)} and found ${search.results.length} unique businesses.</div>` : `<div class="banner banner-info mt">📡 Live Google data (top 60). Tick <b>Deep search</b> for full-city coverage.</div>`}
     <div class="filter-bar">
       <span class="muted" style="font-size:13px">${shown.length} of ${search.results.length} businesses${audited ? ` · ${audited} audited` : ''}</span>
       ${chip('hot', '🔥 Hot leads (55+)', search)}

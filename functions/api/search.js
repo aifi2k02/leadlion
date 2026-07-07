@@ -38,12 +38,20 @@ export async function onRequestPost(context) {
   }
 
   const apiKey = context.env.GOOGLE_PLACES_API_KEY || (body.apiKey || '').trim();
+  const deep = !!body.deep;
 
   let businesses;
   let mode;
+  let meta = {};
   if (apiKey) {
     try {
-      businesses = await googleSearch(keyword, location, apiKey);
+      if (deep) {
+        const r = await deepSearch(keyword, location, apiKey);
+        businesses = r.results;
+        meta = { deep: r.deep, cells: r.cells };
+      } else {
+        businesses = await googleSearch(keyword, location, apiKey);
+      }
       mode = 'live';
     } catch (err) {
       return json({ error: `Google Places error: ${err.message}` }, 502);
@@ -57,7 +65,7 @@ export async function onRequestPost(context) {
     .map((b) => ({ ...b, ...scoreBusiness(b), keyword, location, foundAt: new Date().toISOString() }))
     .sort((a, b) => b.opportunityScore - a.opportunityScore);
 
-  return json({ mode, count: results.length, results });
+  return json({ mode, count: results.length, ...meta, results });
 }
 
 function mapPlace(p) {
@@ -82,9 +90,10 @@ function mapPlace(p) {
   };
 }
 
-async function fetchPage(textQuery, apiKey, pageToken) {
+async function fetchPage(textQuery, apiKey, pageToken, rectangle) {
   const body = { textQuery, pageSize: 20 };
   if (pageToken) body.pageToken = pageToken;
+  if (rectangle) body.locationRestriction = { rectangle };
   const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
     headers: {
@@ -130,6 +139,96 @@ async function googleSearch(keyword, location, apiKey, maxPages = 3) {
     await sleep(1500); // let Google validate the next page token
   }
   return out;
+}
+
+// ---- Deep Search: tile the city into a grid and search each cell ----------
+
+// Get the city's bounding box (viewport) via a single Places lookup — reuses
+// the Places API already enabled, so no extra API to turn on.
+async function geocodeCity(location, apiKey) {
+  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': 'places.viewport,places.location,places.displayName',
+    },
+    body: JSON.stringify({ textQuery: location, pageSize: 1 }),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.places?.[0]?.viewport || null;
+}
+
+// Search one grid cell (strict rectangle boundary), paginating up to 2 pages.
+async function fetchCell(keyword, rectangle, apiKey, maxPages = 2) {
+  const out = [];
+  let token = null;
+  for (let p = 0; p < maxPages; p++) {
+    let data;
+    try {
+      data = await fetchPage(keyword, apiKey, token, rectangle);
+    } catch {
+      break;
+    }
+    for (const place of data.places || []) out.push(mapPlace(place));
+    token = data.nextPageToken;
+    if (!token) break;
+    await sleep(1500);
+  }
+  return out;
+}
+
+// Concurrency-limited map.
+async function mapLimit(items, limit, fn) {
+  const results = [];
+  const queue = items.map((it, i) => [it, i]);
+  const worker = async () => {
+    while (queue.length) {
+      const [it, i] = queue.shift();
+      results[i] = await fn(it, i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length || 1) }, worker));
+  return results;
+}
+
+async function deepSearch(keyword, location, apiKey) {
+  const vp = await geocodeCity(location, apiKey);
+  // No bounding box? fall back to the standard 60-result paginated search.
+  if (!vp?.low || !vp?.high) {
+    return { results: await googleSearch(keyword, location, apiKey), cells: 1, deep: false };
+  }
+
+  const latMin = vp.low.latitude, latMax = vp.high.latitude;
+  const lngMin = vp.low.longitude, lngMax = vp.high.longitude;
+  const N = 4; // 4x4 = 16 cells; each cell up to 40 results
+  const dLat = (latMax - latMin) / N;
+  const dLng = (lngMax - lngMin) / N;
+
+  const cells = [];
+  for (let i = 0; i < N; i++) {
+    for (let j = 0; j < N; j++) {
+      cells.push({
+        low: { latitude: latMin + i * dLat, longitude: lngMin + j * dLng },
+        high: { latitude: latMin + (i + 1) * dLat, longitude: lngMin + (j + 1) * dLng },
+      });
+    }
+  }
+
+  const perCell = await mapLimit(cells, 6, (rect) => fetchCell(keyword, rect, apiKey, 2));
+
+  const seen = new Set();
+  const out = [];
+  for (const arr of perCell) {
+    for (const b of arr) {
+      if (b.placeId && !seen.has(b.placeId)) {
+        seen.add(b.placeId);
+        out.push(b);
+      }
+    }
+  }
+  return { results: out, cells: cells.length, deep: true };
 }
 
 function json(obj, status = 200) {
