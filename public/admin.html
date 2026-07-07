@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LeadLion — Admin</title>
+  <link rel="icon" href="/logo.png">
+  <meta name="theme-color" content="#0e1116">
+  <meta name="robots" content="noindex">
+  <style>
+    :root{--bg:#0e1116;--panel:#161b23;--card:#1c2330;--border:#2a3446;--text:#e8edf5;--dim:#94a3b8;--accent:#f5a623;--accent2:#d97706;--green:#34d399;--red:#f87171}
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;padding:24px 16px}
+    .wrap{max-width:920px;margin:0 auto}
+    .logo{display:flex;align-items:center;gap:10px;font-size:22px;font-weight:700;margin-bottom:24px}
+    .logo img{border-radius:9px}.logo b{color:var(--accent)}
+    a{color:var(--accent);text-decoration:none}
+    input,button,select{font-family:inherit;font-size:14px}
+    input,select{background:var(--panel);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 12px;width:100%}
+    label{display:block;font-size:12.5px;color:var(--dim);margin:0 0 5px}
+    .btn{background:var(--accent);color:#1a1205;border:none;border-radius:8px;padding:11px 18px;font-weight:700;cursor:pointer}
+    .btn:hover{background:var(--accent2)}
+    .btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text);border-radius:7px;padding:6px 11px;cursor:pointer;font-size:12.5px}
+    .btn-danger{background:transparent;border:1px solid var(--border);color:var(--red);border-radius:7px;padding:6px 11px;cursor:pointer;font-size:12.5px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px 22px;margin-bottom:18px}
+    .card h2{font-size:16px;margin-bottom:14px}
+    .grid{display:grid;gap:12px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+    table{width:100%;border-collapse:collapse;font-size:13.5px}
+    th{text-align:left;color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;border-bottom:1px solid var(--border)}
+    td{padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+    code{background:var(--panel);padding:3px 8px;border-radius:6px;font-size:13px;cursor:pointer}
+    .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+    .b-green{background:rgba(52,211,153,.15);color:var(--green)}
+    .b-red{background:rgba(248,113,113,.15);color:var(--red)}
+    .muted{color:var(--dim);font-size:13px}
+    .err{color:var(--red);font-size:13px;margin-top:8px}
+    #app{display:none}
+    .toast{position:fixed;bottom:20px;right:20px;background:var(--card);border:1px solid var(--accent);border-radius:10px;padding:12px 18px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="logo"><img src="/logo.png" width="34" height="34" alt="">Lead<b>Lion</b> <span style="font-size:14px;color:var(--dim);font-weight:400">· Admin</span></div>
+
+    <div id="login" class="card" style="max-width:400px">
+      <h2>Admin login</h2>
+      <label>Admin password</label>
+      <input id="pw" type="password" placeholder="••••••••">
+      <button class="btn" id="login-btn" style="width:100%;margin-top:12px">Log in</button>
+      <div class="err" id="login-err"></div>
+      <p class="muted" style="margin-top:12px">Set the <code>ADMIN_PASSWORD</code> secret in Cloudflare Pages → Settings → Variables and Secrets, then redeploy.</p>
+    </div>
+
+    <div id="app">
+      <div class="card">
+        <h2>Create a trial account</h2>
+        <div class="row">
+          <div style="flex:2;min-width:180px"><label>Label (who is this for?)</label><input id="c-label" placeholder="e.g. Ali — Karachi salon owner"></div>
+          <div style="flex:1;min-width:90px"><label>Searches</label><input id="c-searches" type="number" value="3" min="1"></div>
+          <div style="flex:1;min-width:90px"><label>Results/search</label><input id="c-results" type="number" value="20" min="1"></div>
+          <div style="flex:1;min-width:90px"><label>Expires (days)</label><input id="c-days" type="number" value="7" min="1"></div>
+          <button class="btn" id="create-btn">Create</button>
+        </div>
+        <div class="err" id="create-err"></div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <h2 style="margin:0">Accounts</h2>
+          <button class="btn-ghost" id="refresh">↻ Refresh</button>
+        </div>
+        <div style="overflow-x:auto"><table id="tbl"><thead><tr>
+          <th>Code</th><th>Label</th><th>Type</th><th>Usage</th><th>Expires</th><th>Status</th><th></th>
+        </tr></thead><tbody id="rows"><tr><td colspan="7" class="muted">Loading…</td></tr></tbody></table></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let PW = '';
+    const $ = (s) => document.querySelector(s);
+    const api = (body) => fetch('/api/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: PW, ...body }) }).then(r => r.json().then(d => ({ ok: r.ok, d })));
+    const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    function toast(m) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = m; document.body.appendChild(t); setTimeout(() => t.remove(), 2500); }
+
+    $('#login-btn').onclick = async () => {
+      PW = $('#pw').value;
+      const { ok, d } = await api({ action: 'list' });
+      if (!ok) { $('#login-err').textContent = d.error || 'Login failed'; return; }
+      $('#login').style.display = 'none';
+      $('#app').style.display = '';
+      render(d.accounts);
+    };
+    $('#pw').onkeydown = (e) => { if (e.key === 'Enter') $('#login-btn').click(); };
+
+    $('#refresh').onclick = load;
+    async function load() { const { ok, d } = await api({ action: 'list' }); if (ok) render(d.accounts); }
+
+    $('#create-btn').onclick = async () => {
+      const label = $('#c-label').value.trim();
+      const { ok, d } = await api({ action: 'create', label, searches: +$('#c-searches').value, results: +$('#c-results').value, days: +$('#c-days').value });
+      if (!ok) { $('#create-err').textContent = d.error || 'Failed'; return; }
+      $('#c-label').value = '';
+      toast('Trial created: ' + d.account.code);
+      load();
+    };
+
+    function render(accounts) {
+      const rows = $('#rows');
+      if (!accounts.length) { rows.innerHTML = '<tr><td colspan="7" class="muted">No accounts yet.</td></tr>'; return; }
+      rows.innerHTML = accounts.map(a => {
+        const exp = a.expiresAt ? new Date(a.expiresAt).toLocaleDateString() : '—';
+        const expired = a.expiresAt && Date.now() > new Date(a.expiresAt).getTime();
+        const status = !a.active ? '<span class="badge b-red">disabled</span>' : expired ? '<span class="badge b-red">expired</span>' : '<span class="badge b-green">active</span>';
+        return `<tr>
+          <td><code onclick="navigator.clipboard.writeText('${esc(a.code)}');" title="Click to copy">${esc(a.code)}</code></td>
+          <td>${esc(a.label || '')}</td>
+          <td>${esc(a.type)}</td>
+          <td>${a.searchesUsed || 0}/${a.searchLimit ?? '∞'}</td>
+          <td>${exp}</td>
+          <td>${status}</td>
+          <td style="white-space:nowrap;text-align:right">
+            <button class="btn-ghost" data-act="reset" data-code="${esc(a.code)}">Reset</button>
+            <button class="btn-ghost" data-act="revoke" data-code="${esc(a.code)}">${a.active ? 'Disable' : 'Enable'}</button>
+            <button class="btn-danger" data-act="delete" data-code="${esc(a.code)}">Delete</button>
+          </td>
+        </tr>`;
+      }).join('');
+      rows.querySelectorAll('[data-act]').forEach(b => {
+        b.onclick = async () => {
+          const act = b.dataset.act, code = b.dataset.code;
+          if (act === 'delete' && !confirm('Delete ' + code + '?')) return;
+          await api({ action: act, code });
+          toast(act === 'reset' ? 'Usage reset' : act === 'delete' ? 'Deleted' : 'Toggled');
+          load();
+        };
+      });
+    }
+  </script>
+</body>
+</html>

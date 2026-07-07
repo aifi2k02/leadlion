@@ -32,6 +32,17 @@ export async function onRequestPost(context) {
   const report = body.report;
   if (!report || !report.name) return json({ error: 'report data required' }, 400);
 
+  // Report sharing requires an account whose plan allows it (blocks trial/demo).
+  const code = (body.code || '').trim();
+  const isOwner = !!(context.env.ADMIN_PASSWORD && code === context.env.ADMIN_PASSWORD);
+  if (!isOwner) {
+    const { getAccount, isExpired } = await import('../_lib/accounts.js');
+    const acct = code ? await getAccount(kv, code) : null;
+    if (!acct || !acct.active || isExpired(acct) || !acct.features?.share) {
+      return json({ error: 'Report sharing is not available on your plan.' }, 403);
+    }
+  }
+
   // Reuse an existing id when re-publishing the same lead, so the link is stable
   // and view history is preserved.
   const id = (typeof body.id === 'string' && /^[a-z0-9]{6,16}$/.test(body.id)) ? body.id : makeId();

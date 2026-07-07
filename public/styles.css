@@ -273,6 +273,14 @@ td .sub { color: var(--text-dim); font-size: 12.5px; }
 .save-fb { color: var(--green); font-size: 12px; font-weight: 600; opacity: 0; transition: opacity 0.2s; margin-left: 6px; }
 .save-fb.show { opacity: 1; }
 
+/* login gate */
+#gate { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.gate-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 40px 34px; max-width: 380px; width: 100%; text-align: center; }
+.gate-card h1 { font-size: 26px; margin: 14px 0 4px; letter-spacing: -0.4px; }
+.gate-card h1 b { color: var(--accent); }
+.gate-card input { margin: 18px 0 12px; text-align: center; font-size: 15px; }
+.gate-card .banner { margin: 14px 0; }
+
 /* selection + bulk delete */
 .sel-box, .sel-all { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 .bulk-bar { display: flex; align-items: center; gap: 12px; background: var(--bg-card); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; }

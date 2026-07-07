@@ -13,6 +13,21 @@ function saveSettings(patch) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...getSettings(), ...patch }));
 }
 
+// ---------------------------------------------------------------- session / access
+const SESSION_KEY = 'leadlion_session';
+let SESSION = null;
+
+function loadSession() {
+  try { SESSION = JSON.parse(localStorage.getItem(SESSION_KEY)); } catch { SESSION = null; }
+  return SESSION;
+}
+function setSession(s) { SESSION = s; localStorage.setItem(SESSION_KEY, JSON.stringify(s)); }
+function clearSession() { SESSION = null; localStorage.removeItem(SESSION_KEY); }
+function accessCode() { return SESSION?.code || undefined; }
+function feat() { return SESSION?.profile?.features || { deep: false, download: false, share: false }; }
+function isDemo() { return !SESSION || SESSION.profile?.type === 'demo'; }
+function isTrial() { return SESSION?.profile?.type === 'trial'; }
+
 // ---------------------------------------------------------------- storage
 // Same interface for localStorage and Supabase so views don't care which.
 const LEADS_KEY = 'leadlion_leads';
@@ -303,21 +318,23 @@ async function viewDashboard() {
 
 // -------- find leads
 async function viewFind() {
-  const s = getSettings();
+  const p = SESSION?.profile || {};
   $('#main').innerHTML = `
     <h1>Find Leads</h1>
     <p class="subtitle">Search any niche in any city — every result is scored by sales opportunity.</p>
+    ${trialBanner()}
     <div class="card">
       <div class="search-row">
         <div class="field"><label>Niche / keyword</label><input id="kw" placeholder="e.g. plumber, dentist, roofing" value="${esc(lastSearch?.keyword || '')}"></div>
         <div class="field"><label>Location</label><input id="loc" placeholder="e.g. Austin TX, Manchester UK" value="${esc(lastSearch?.location || '')}"></div>
         <button id="go">Search</button>
       </div>
+      ${feat().deep ? `
       <label class="flex" style="margin-top:12px;cursor:pointer;font-size:13.5px;color:var(--text)">
         <input type="checkbox" id="deep" style="width:auto;margin:0" ${lastSearch?.deep ? 'checked' : ''}>
         <span>🌆 <b>Deep search</b> — scan the whole city grid for hundreds of leads (slower, ~20-40s). Off = fast top 60.</span>
-      </label>
-      ${!s.googleApiKey ? `<p class="muted mt" style="font-size:13px">💡 No Google API key set — you'll get realistic <b>demo data</b>. Add your free key in <a href="#/settings" style="color:var(--accent)">Settings</a> for live results.</p>` : ''}
+      </label>` : ''}
+      ${isDemo() ? `<p class="muted mt" style="font-size:13px">🧪 Demo mode — sample data only. Enter an access code (Log out → code) for live results.</p>` : ''}
     </div>
     <div id="results"></div>
   `;
@@ -326,11 +343,25 @@ async function viewFind() {
   if (lastSearch?.results) renderResults(lastSearch);
 }
 
+// Trial/demo banner shown above search + results.
+function trialBanner() {
+  const p = SESSION?.profile;
+  if (!p) return '';
+  if (p.type === 'trial') {
+    const left = p.remaining ?? p.searchLimit ?? 0;
+    return `<div class="banner banner-warn mb">🎟️ <b>Trial account</b> — ${left} of ${p.searchLimit} searches left · up to ${p.resultCap} results each · exports &amp; sharing are disabled. Ask for full access to unlock everything.</div>`;
+  }
+  if (p.type === 'demo') {
+    return `<div class="banner banner-warn mb">🧪 <b>Demo mode</b> — sample data only. Log out and enter an access code for live results.</div>`;
+  }
+  return '';
+}
+
 async function runSearch() {
   const keyword = $('#kw').value.trim();
   const location = $('#loc').value.trim();
   if (!keyword || !location) return toast('Enter both a keyword and a location');
-  const deep = $('#deep')?.checked;
+  const deep = feat().deep && $('#deep')?.checked;
   const btn = $('#go');
   btn.disabled = true;
   btn.innerHTML = deep ? '<span class="spinner"></span> Scanning city…' : '<span class="spinner"></span>';
@@ -339,10 +370,21 @@ async function runSearch() {
     const res = await fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keyword, location, deep, apiKey: getSettings().googleApiKey || undefined }),
+      body: JSON.stringify({ keyword, location, deep, code: accessCode() }),
     });
     const data = await res.json();
+    if (res.status === 403 && data.limitReached) {
+      toast('Trial search limit reached — ask for full access to keep searching.');
+      return;
+    }
     if (!res.ok) throw new Error(data.error || 'Search failed');
+    // update trial remaining count in the session
+    if (data.trial && SESSION?.profile) {
+      SESSION.profile.remaining = data.trial.remaining;
+      SESSION.profile.searchesUsed = data.trial.used;
+      setSession(SESSION);
+      renderSessionFoot();
+    }
     attachCompetitorStats(data.results);
     lastSearch = { keyword, location, mode: data.mode, deep: data.deep, cells: data.cells, results: data.results, filters: {} };
     renderResults(lastSearch);
@@ -444,7 +486,7 @@ function renderResults(search) {
       <span style="flex:1"></span>
       ${auditable ? `<button class="btn-sm" id="audit-all">🌐 Audit all websites (${auditable})</button>` : ''}
       <button class="btn-ghost btn-sm" id="save-all">💾 Save all shown</button>
-      <button class="btn-ghost btn-sm" id="csv">⬇️ CSV</button>
+      ${feat().download ? `<button class="btn-ghost btn-sm" id="csv">⬇️ CSV</button>` : ''}
     </div>
     <div class="table-wrap">${leadsTable(shown, { saveBtn: true, saved, showWeb: audited > 0 })}</div>
   `;
@@ -458,7 +500,8 @@ function renderResults(search) {
     toast(`Saved ${shown.length} leads`);
     renderResults(search);
   };
-  $('#csv').onclick = () => exportCsv(shown, `${search.keyword}-${search.location}`);
+  const csvBtn = $('#csv');
+  if (csvBtn) csvBtn.onclick = () => exportCsv(shown, `${search.keyword}-${search.location}`);
   bindLeadRows(shown, search);
 }
 
@@ -869,7 +912,7 @@ async function viewLeads() {
           <button class="seg-btn ${leadsView === 'board' ? 'on' : ''}" data-view="board">▦ Board</button>
           <button class="seg-btn ${leadsView === 'list' ? 'on' : ''}" data-view="list">☰ List</button>
         </div>` : ''}
-        <button class="btn-ghost btn-sm" id="csv-all" ${leads.length ? '' : 'disabled'}>⬇️ Export CSV</button>
+        ${feat().download ? `<button class="btn-ghost btn-sm" id="csv-all" ${leads.length ? '' : 'disabled'}>⬇️ Export CSV</button>` : ''}
       </div>
     </div>
     ${leads.length === 0
@@ -972,7 +1015,7 @@ async function viewReport(id) {
   $('#main').innerHTML = `
     <div class="flex spread mb no-print">
       <a class="btn-ghost btn-sm" href="#/leads">← Back</a>
-      <button onclick="window.print()">🖨️ Print / Save as PDF</button>
+      ${feat().download ? `<button onclick="window.print()">🖨️ Print / Save as PDF</button>` : ''}
     </div>
     <div class="card mb no-print" id="share-panel"><p class="muted">Loading share options…</p></div>
     <div class="report-page">
@@ -1094,6 +1137,15 @@ async function renderSharePanel(lead) {
   if (!panel) return;
   const url = lead.reportUrl;
 
+  if (!feat().share) {
+    panel.innerHTML = `
+      <div class="flex spread">
+        <div><b>🌐 Share this report</b><div class="muted" style="font-size:13px">Publishing a live, trackable report link is available on the full plan.</div></div>
+        <span class="badge badge-muted">🔒 Locked</span>
+      </div>`;
+    return;
+  }
+
   if (!url) {
     panel.innerHTML = `
       <div class="flex spread">
@@ -1145,7 +1197,7 @@ async function publishReport(lead) {
     const res = await fetch('/api/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ report: buildReportPayload(lead), id: lead.reportId }),
+      body: JSON.stringify({ report: buildReportPayload(lead), id: lead.reportId, code: accessCode() }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Publish failed');
@@ -1251,12 +1303,81 @@ function exportCsv(rows, name) {
 // ---------------------------------------------------------------- boot
 function updateStorageBadge(supaOk) {
   const b = $('#storage-badge');
+  if (!b) return;
   b.textContent = supaOk ? 'Supabase synced' : 'Local storage';
   b.className = supaOk ? 'badge badge-green' : 'badge badge-muted';
 }
 
-window.addEventListener('hashchange', render);
-initSupabase().then(updateStorageBadge).then(render);
+// ---------------------------------------------------------------- login gate
+function renderGate(message) {
+  document.getElementById('app').style.display = 'none';
+  let gate = document.getElementById('gate');
+  if (!gate) { gate = document.createElement('div'); gate.id = 'gate'; document.body.appendChild(gate); }
+  gate.innerHTML = `
+    <div class="gate-card">
+      <img src="/logo.png" width="72" height="72" alt="" style="border-radius:16px">
+      <h1>Lead<b>Lion</b></h1>
+      <p class="muted">Enter your access code to continue.</p>
+      ${message ? `<div class="banner banner-warn" style="text-align:left">${esc(message)}</div>` : ''}
+      <input id="gate-code" placeholder="Access code" autocomplete="off">
+      <button id="gate-go" style="width:100%">Enter →</button>
+      <div class="muted" style="font-size:13px;margin-top:14px">No code? <a id="gate-demo" href="#" style="color:var(--accent)">Explore the demo</a> with sample data.</div>
+    </div>`;
+  const submit = async () => {
+    const code = document.getElementById('gate-code').value.trim();
+    if (!code) return;
+    const btn = document.getElementById('gate-go');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+    try {
+      const res = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Login failed');
+      setSession({ code, profile: data.profile });
+      enterApp();
+    } catch (e) {
+      renderGate(e.message);
+    }
+  };
+  document.getElementById('gate-go').onclick = submit;
+  document.getElementById('gate-code').onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+  document.getElementById('gate-demo').onclick = (e) => {
+    e.preventDefault();
+    setSession({ code: null, profile: { type: 'demo', live: false, features: { deep: false, download: false, share: false }, resultCap: 20 } });
+    enterApp();
+  };
+}
+
+function enterApp() {
+  const gate = document.getElementById('gate');
+  if (gate) gate.remove();
+  document.getElementById('app').style.display = '';
+  renderSessionFoot();
+  initSupabase().then(updateStorageBadge).then(render);
+}
+
+function renderSessionFoot() {
+  const foot = document.querySelector('.sidebar-foot');
+  if (!foot) return;
+  const p = SESSION?.profile || {};
+  const label = p.type === 'full' ? 'Full access' : p.type === 'trial' ? `Trial · ${p.remaining ?? '?'} left` : 'Demo mode';
+  const cls = p.type === 'full' ? 'badge-green' : p.type === 'trial' ? 'badge-yellow' : 'badge-muted';
+  foot.innerHTML = `
+    <div id="storage-badge" class="badge badge-muted">Local storage</div>
+    <div class="flex spread" style="margin-top:8px">
+      <span class="badge ${cls}">${esc(label)}</span>
+      <button class="btn-ghost btn-sm" id="logout-btn">Log out</button>
+    </div>`;
+  document.getElementById('logout-btn').onclick = () => { clearSession(); location.reload(); };
+}
+
+function boot() {
+  loadSession();
+  if (SESSION) enterApp();
+  else renderGate();
+}
+
+window.addEventListener('hashchange', () => { if (SESSION) render(); });
+boot();
 
 // PWA: register service worker for installability + offline shell
 if ('serviceWorker' in navigator) {

@@ -1,5 +1,6 @@
 import { scoreBusiness } from '../_lib/scoring.js';
 import { demoSearch } from '../_lib/demo.js';
+import { getAccount, isExpired, putAccount } from '../_lib/accounts.js';
 
 // POST /api/search  { keyword, location, apiKey? }
 // Uses (in priority order): server env key -> user-supplied key -> demo data.
@@ -39,24 +40,59 @@ export async function onRequestPost(context) {
     return json({ error: 'keyword and location are required' }, 400);
   }
 
-  const apiKey = context.env.GOOGLE_PLACES_API_KEY || (body.apiKey || '').trim();
-  const deep = !!body.deep;
+  const code = (body.code || '').trim();
+  const kv = context.env.REPORTS;
+
+  // --- Resolve access tier (server-enforced) -------------------------------
+  const isOwner = !!(context.env.ADMIN_PASSWORD && code === context.env.ADMIN_PASSWORD);
+  let account = null;
+  if (!isOwner && code && kv) {
+    account = await getAccount(kv, code);
+    if (!account || !account.active) return json({ error: 'Invalid or deactivated access code.' }, 401);
+    if (isExpired(account)) return json({ error: 'This trial has expired.' }, 403);
+  }
+
+  // Live data requires a valid account (owner or trial) AND a server key.
+  const serverKey = context.env.GOOGLE_PLACES_API_KEY;
+  const ownerKey = isOwner ? (serverKey || (body.apiKey || '').trim()) : serverKey;
+  const canLive = (isOwner || account) && ownerKey;
+
+  let deep = !!body.deep;
+  let resultCap = null;
+  if (account && account.type === 'trial') {
+    // Trial limits: enforced here, not on the client.
+    if ((account.searchesUsed || 0) >= account.searchLimit) {
+      return json({ error: 'Trial search limit reached.', limitReached: true }, 403);
+    }
+    deep = false;                        // no deep search on trial
+    resultCap = account.resultCap || 20; // cap results
+  }
 
   let businesses;
   let mode;
   let meta = {};
-  if (apiKey) {
+  if (canLive) {
     try {
       if (deep) {
-        const r = await deepSearch(keyword, location, apiKey);
+        const r = await deepSearch(keyword, location, ownerKey);
         businesses = r.results;
         meta = { deep: r.deep, cells: r.cells };
       } else {
-        businesses = await googleSearch(keyword, location, apiKey);
+        businesses = await googleSearch(keyword, location, ownerKey, resultCap ? 1 : 3, resultCap);
       }
       mode = 'live';
     } catch (err) {
       return json({ error: `Google Places error: ${err.message}` }, 502);
+    }
+    // Consume one trial search after a successful live search.
+    if (account && account.type === 'trial') {
+      account.searchesUsed = (account.searchesUsed || 0) + 1;
+      await putAccount(kv, account);
+      meta.trial = {
+        used: account.searchesUsed,
+        limit: account.searchLimit,
+        remaining: Math.max(0, account.searchLimit - account.searchesUsed),
+      };
     }
   } else {
     businesses = demoSearch(keyword, location);
@@ -119,7 +155,7 @@ async function fetchPage(textQuery, apiKey, pageToken, rectangle) {
 
 // Google Text Search caps a single query at 60 results (3 pages of 20).
 // We paginate through all available pages and dedupe by place id.
-async function googleSearch(keyword, location, apiKey, maxPages = 3) {
+async function googleSearch(keyword, location, apiKey, maxPages = 3, cap = null) {
   const textQuery = `${keyword} in ${location}`;
   const seen = new Set();
   const out = [];
@@ -139,11 +175,12 @@ async function googleSearch(keyword, location, apiKey, maxPages = 3) {
         out.push(mapPlace(p));
       }
     }
+    if (cap && out.length >= cap) return out.slice(0, cap);
     pageToken = data.nextPageToken;
     if (!pageToken) break;
     await sleep(1500); // let Google validate the next page token
   }
-  return out;
+  return cap ? out.slice(0, cap) : out;
 }
 
 // ---- Deep Search: tile the city into a grid and search each cell ----------
