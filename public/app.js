@@ -118,11 +118,12 @@ const STATUS_LABEL = { new: '🆕 New', contacted: '📞 Contacted', meeting: '�
 
 // ---------------------------------------------------------------- outreach
 function allIssues(lead) {
-  // GMB issues first, then website-audit issues, criticals before warnings
+  // GMB issues first, then website-audit issues, then speed — criticals first
   const rank = { critical: 0, warning: 1, info: 2 };
   const gmb = [...(lead.issues || [])].sort((a, b) => rank[a.severity] - rank[b.severity]);
   const web = [...(lead.webAudit?.issues || [])].sort((a, b) => rank[a.severity] - rank[b.severity]);
-  return [...gmb, ...web];
+  const speed = lead.pageSpeed?.ok && !lead.pageSpeed.finding.ok ? [lead.pageSpeed.finding] : [];
+  return [...gmb, ...web, ...speed];
 }
 
 function buildOutreach(lead) {
@@ -262,6 +263,16 @@ async function runSearch() {
   }
 }
 
+// Combined opportunity = GMB opportunity + a headroom-scaled boost from a weak
+// website. Website weakness can only ADD opportunity, never lower a lead that's
+// already weak on GMB. A dead/weak site pushes a strong-GMB business up the list.
+function combinedOpp(r) {
+  const gmb = r.opportunityScore;
+  if (!r.webAudit) return gmb;
+  const webOpp = 100 - (r.webAudit.websiteScore || 0);
+  return Math.min(100, Math.round(gmb + (100 - gmb) * (webOpp / 100) * 0.6));
+}
+
 function applyFilters(search) {
   const f = search.filters || {};
   return search.results.filter((r) =>
@@ -269,31 +280,67 @@ function applyFilters(search) {
     (!f.unclaimed || r.claimed === false) &&
     (!f.lowRating || (r.rating && r.rating < 4)) &&
     (!f.fewReviews || (r.reviewCount || 0) < 25) &&
-    (!f.hot || r.opportunityScore >= 55)
+    (!f.weakWeb || (r.webAudit && r.webAudit.grade && ['C', 'D', 'F'].includes(r.webAudit.grade))) &&
+    (!f.hot || combinedOpp(r) >= 55)
   );
 }
 
+// Bulk-audit every listed website (concurrency-limited), then re-rank.
+async function auditAllWebsites(search, btn) {
+  const targets = search.results.filter((r) => r.website && !r.webAudit);
+  if (!targets.length) return toast('No un-audited websites to check');
+  btn.disabled = true;
+  const total = targets.length;
+  let done = 0;
+  const queue = [...targets];
+  const worker = async () => {
+    while (queue.length) {
+      const r = queue.shift();
+      try {
+        const res = await fetch('/api/webaudit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: r.website }),
+        });
+        const audit = await res.json();
+        if (res.ok) r.webAudit = audit;
+      } catch { /* skip failed audit, keep going */ }
+      done++;
+      btn.innerHTML = `<span class="spinner"></span> ${done}/${total}`;
+    }
+  };
+  await Promise.all(Array.from({ length: 4 }, worker));
+  toast(`Audited ${done} websites — re-ranked by combined opportunity`);
+  renderResults(search);
+}
+
 function renderResults(search) {
-  const shown = applyFilters(search);
+  const shown = applyFilters(search).sort((a, b) => combinedOpp(b) - combinedOpp(a));
   const saved = new Set(store.local().map((l) => l.id));
+  const auditable = search.results.filter((r) => r.website && !r.webAudit).length;
+  const audited = search.results.filter((r) => r.webAudit).length;
   $('#results').innerHTML = `
     ${search.mode === 'demo' ? `<div class="banner banner-warn mt">🧪 Demo data (deterministic sample). Add your Google Places API key in Settings for live business data.</div>` : `<div class="banner banner-info mt">📡 Live Google data.</div>`}
     <div class="filter-bar">
-      <span class="muted" style="font-size:13px">${shown.length} of ${search.results.length} businesses</span>
+      <span class="muted" style="font-size:13px">${shown.length} of ${search.results.length} businesses${audited ? ` · ${audited} audited` : ''}</span>
       ${chip('hot', '🔥 Hot leads (55+)', search)}
       ${chip('noWebsite', 'No website', search)}
       ${chip('unclaimed', 'Unclaimed', search)}
       ${chip('lowRating', 'Rating < 4★', search)}
       ${chip('fewReviews', '< 25 reviews', search)}
+      ${audited ? chip('weakWeb', '🌐 Weak website', search) : ''}
       <span style="flex:1"></span>
+      ${auditable ? `<button class="btn-sm" id="audit-all">🌐 Audit all websites (${auditable})</button>` : ''}
       <button class="btn-ghost btn-sm" id="save-all">💾 Save all shown</button>
       <button class="btn-ghost btn-sm" id="csv">⬇️ CSV</button>
     </div>
-    <div class="table-wrap">${leadsTable(shown, { saveBtn: true, saved })}</div>
+    <div class="table-wrap">${leadsTable(shown, { saveBtn: true, saved, showWeb: audited > 0 })}</div>
   `;
   document.querySelectorAll('.chip').forEach((c) => {
     c.onclick = () => { search.filters[c.dataset.f] = !search.filters[c.dataset.f]; renderResults(search); };
   });
+  const auditAllBtn = $('#audit-all');
+  if (auditAllBtn) auditAllBtn.onclick = () => auditAllWebsites(search, auditAllBtn);
   $('#save-all').onclick = async () => {
     for (const r of shown) await store.save(r);
     toast(`Saved ${shown.length} leads`);
@@ -308,6 +355,21 @@ function chip(key, label, search) {
 }
 
 // -------- shared table
+function webCell(r) {
+  if (!r.website) return '<span class="badge badge-red">missing</span>';
+  if (!r.webAudit) return '✅';
+  if (r.webAudit.reachable === false) return '<span class="badge badge-red">dead site</span>';
+  const g = r.webAudit.grade;
+  const cls = g === 'A' || g === 'B' ? 'badge-green' : g === 'C' ? 'badge-yellow' : 'badge-red';
+  return `<span class="badge ${cls}">Site ${g}</span>`;
+}
+
+function oppCell(r) {
+  const combined = combinedOpp(r);
+  const boosted = r.webAudit && combined > r.opportunityScore;
+  return `${scorePill(combined)}${boosted ? '<div class="sub" style="color:var(--accent);font-size:11px">+web</div>' : ''}`;
+}
+
 function leadsTable(rows, opts = {}) {
   if (!rows.length) return '<div class="card muted">Nothing here yet.</div>';
   return `<table>
@@ -317,11 +379,11 @@ function leadsTable(rows, opts = {}) {
     <tbody>
       ${rows.map((r, i) => `
         <tr class="row-click" data-i="${i}">
-          <td>${scorePill(r.opportunityScore)}</td>
+          <td>${opts.saveBtn ? oppCell(r) : scorePill(r.opportunityScore)}</td>
           <td><div><b>${esc(r.name)}</b></div><div class="sub">${esc(r.address)}</div></td>
           <td>${r.rating ? r.rating + '★' : '<span class="badge badge-red">none</span>'}</td>
           <td>${r.reviewCount ?? 0}</td>
-          <td>${r.website ? '✅' : '<span class="badge badge-red">missing</span>'}</td>
+          <td>${webCell(r)}</td>
           <td>${gradeBadge(r.grade)}</td>
           ${opts.saveBtn
             ? `<td>${opts.saved?.has(r.placeId) ? '<span class="badge badge-green">saved</span>' : `<button class="btn-sm save-one" data-i="${i}">Save</button>`}</td>`
@@ -384,7 +446,43 @@ function webAuditBlock(l) {
         </div>`).join('')}
       ${passed.length ? `<div class="finding"><span class="icon">✅</span><div class="muted">${passed.length} checks passed: ${passed.map((f) => f.label).join(', ')}</div></div>` : ''}
       ${w.emails?.length ? `<div class="finding"><span class="icon">📧</span><div><b>Email found on site:</b> ${w.emails.map(esc).join(', ')}</div></div>` : ''}
-    </div>`;
+    </div>
+    ${pageSpeedBlock(l)}`;
+}
+
+// -------- PageSpeed (real Lighthouse mobile score) block
+function pageSpeedBlock(l) {
+  const p = l.pageSpeed;
+  if (!p) {
+    return `
+      <div class="card mb" style="padding:14px 16px">
+        <div class="flex spread">
+          <div>
+            <b>⚡ Mobile speed test</b>
+            <div class="muted" style="font-size:13px">Real Google Lighthouse score — hard numbers for your pitch. Takes ~15s.</div>
+          </div>
+          <button class="btn-sm" id="run-pagespeed">Run speed test</button>
+        </div>
+      </div>`;
+  }
+  if (!p.ok) {
+    return `<div class="banner banner-warn mb">⚡ Speed test unavailable: ${esc(p.error || 'failed')}</div>`;
+  }
+  const ring = p.score >= 90 ? 'var(--green)' : p.score >= 50 ? 'var(--yellow)' : 'var(--red)';
+  const m = p.metrics || {};
+  const metricRow = (label, x) => x?.value ? `<div class="flex spread" style="font-size:13px"><span class="muted">${label}</span><span>${esc(x.value)}</span></div>` : '';
+  return `
+    <h2 style="font-size:15px">⚡ Mobile speed ${gradeBadge(p.grade)}</h2>
+    <div class="flex mb" style="align-items:center;gap:16px">
+      <div class="score-pill" style="min-width:56px;font-size:20px;background:${ring}22;color:${ring}">${p.score}</div>
+      <div style="flex:1;min-width:180px">
+        ${metricRow('Largest Contentful Paint', m.lcp)}
+        ${metricRow('Speed Index', m.si)}
+        ${metricRow('Total Blocking Time', m.tbt)}
+        ${metricRow('Cumulative Layout Shift', m.cls)}
+      </div>
+    </div>
+    ${!p.finding.ok ? `<div class="finding"><span class="icon">${p.finding.severity === 'critical' ? '🔴' : '🟡'}</span><div><div>${esc(p.finding.text)}</div><div class="pitch">💰 ${esc(p.finding.pitch)}</div></div></div>` : `<div class="finding"><span class="icon">✅</span><div>${esc(p.finding.text)}</div></div>`}`;
 }
 
 // -------- lead modal
@@ -462,6 +560,34 @@ async function openLeadModal(lead) {
         toast('Audit error: ' + e.message);
         auditBtn.disabled = false;
         auditBtn.textContent = 'Run website audit';
+      }
+    };
+  }
+
+  const psBtn = $('#run-pagespeed');
+  if (psBtn) {
+    psBtn.onclick = async () => {
+      psBtn.disabled = true;
+      psBtn.innerHTML = '<span class="spinner"></span> Testing… (~15s)';
+      try {
+        const res = await fetch('/api/pagespeed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: l.website }),
+        });
+        const ps = await res.json();
+        l.pageSpeed = ps;
+        if (isSaved) await store.update(l.id, { pageSpeed: ps });
+        if (lastSearch?.results) {
+          const r = lastSearch.results.find((x) => x.placeId === (l.placeId || l.id));
+          if (r) r.pageSpeed = ps;
+        }
+        toast(ps.ok ? `Mobile speed: ${ps.score}/100` : 'Speed test failed');
+        openLeadModal(l);
+      } catch (e) {
+        toast('Speed test error: ' + e.message);
+        psBtn.disabled = false;
+        psBtn.textContent = 'Run speed test';
       }
     };
   }
@@ -596,6 +722,18 @@ async function viewReport(id) {
             ${lead.webAudit.issues.map((i) => `<div class="report-finding"><span>${i.severity === 'critical' ? '🔴' : i.severity === 'warning' ? '🟡' : 'ℹ️'}</span><div><b>${esc(i.text)}</b>${i.pitch ? `<div class="pitch">${esc(i.pitch)}</div>` : ''}</div></div>`).join('')}
             ${lead.webAudit.findings.filter((f) => f.ok).map((f) => `<div class="report-finding"><span>✅</span><div>${esc(f.text)}</div></div>`).join('')}
           `}
+      </div>` : ''}
+
+      ${lead.pageSpeed?.ok ? `
+      <div class="report-section">
+        <h2>⚡ Mobile Speed — ${lead.pageSpeed.score}/100 (Grade ${lead.pageSpeed.grade})</h2>
+        <div class="report-meta-grid">
+          ${lead.pageSpeed.metrics.lcp?.value ? `<span class="k">Largest Contentful Paint</span><span>${esc(lead.pageSpeed.metrics.lcp.value)}</span>` : ''}
+          ${lead.pageSpeed.metrics.si?.value ? `<span class="k">Speed Index</span><span>${esc(lead.pageSpeed.metrics.si.value)}</span>` : ''}
+          ${lead.pageSpeed.metrics.tbt?.value ? `<span class="k">Total Blocking Time</span><span>${esc(lead.pageSpeed.metrics.tbt.value)}</span>` : ''}
+          ${lead.pageSpeed.metrics.cls?.value ? `<span class="k">Cumulative Layout Shift</span><span>${esc(lead.pageSpeed.metrics.cls.value)}</span>` : ''}
+        </div>
+        ${!lead.pageSpeed.finding.ok ? `<div class="report-finding" style="margin-top:10px"><span>${lead.pageSpeed.finding.severity === 'critical' ? '🔴' : '🟡'}</span><div><b>${esc(lead.pageSpeed.finding.text)}</b><div class="pitch">${esc(lead.pageSpeed.finding.pitch)}</div></div></div>` : ''}
       </div>` : ''}
 
       <div class="report-cta">
