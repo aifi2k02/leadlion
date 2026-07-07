@@ -19,7 +19,10 @@ const FIELD_MASK = [
   'places.googleMapsUri',
   'places.primaryTypeDisplayName',
   'places.editorialSummary',
+  'nextPageToken', // enables pagination (top-level, no places. prefix)
 ].join(',');
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export async function onRequestPost(context) {
   let body;
@@ -57,22 +60,8 @@ export async function onRequestPost(context) {
   return json({ mode, count: results.length, results });
 }
 
-async function googleSearch(keyword, location, apiKey) {
-  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Goog-Api-Key': apiKey,
-      'X-Goog-FieldMask': FIELD_MASK,
-    },
-    body: JSON.stringify({ textQuery: `${keyword} in ${location}`, maxResultCount: 20 }),
-  });
-  if (!res.ok) {
-    const detail = await res.json().catch(() => ({}));
-    throw new Error(detail?.error?.message || `HTTP ${res.status}`);
-  }
-  const data = await res.json();
-  return (data.places || []).map((p) => ({
+function mapPlace(p) {
+  return {
     placeId: p.id,
     demo: false,
     name: p.displayName?.text || 'Unknown',
@@ -90,7 +79,57 @@ async function googleSearch(keyword, location, apiKey) {
     description: p.editorialSummary?.text || null,
     businessStatus: p.businessStatus || 'OPERATIONAL',
     mapsUrl: p.googleMapsUri || null,
-  }));
+  };
+}
+
+async function fetchPage(textQuery, apiKey, pageToken) {
+  const body = { textQuery, pageSize: 20 };
+  if (pageToken) body.pageToken = pageToken;
+  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': FIELD_MASK,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    const err = new Error(detail?.error?.message || `HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+// Google Text Search caps a single query at 60 results (3 pages of 20).
+// We paginate through all available pages and dedupe by place id.
+async function googleSearch(keyword, location, apiKey, maxPages = 3) {
+  const textQuery = `${keyword} in ${location}`;
+  const seen = new Set();
+  const out = [];
+  let pageToken = null;
+
+  for (let page = 0; page < maxPages; page++) {
+    let data;
+    try {
+      data = await fetchPage(textQuery, apiKey, pageToken);
+    } catch (err) {
+      if (page === 0) throw err; // first page failing = real error
+      break; // later page failed (e.g. token not ready) — return what we have
+    }
+    for (const p of data.places || []) {
+      if (p.id && !seen.has(p.id)) {
+        seen.add(p.id);
+        out.push(mapPlace(p));
+      }
+    }
+    pageToken = data.nextPageToken;
+    if (!pageToken) break;
+    await sleep(1500); // let Google validate the next page token
+  }
+  return out;
 }
 
 function json(obj, status = 200) {
