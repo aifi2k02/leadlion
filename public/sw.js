@@ -1,8 +1,8 @@
 // LeadLion service worker — caches the app shell for instant loads / offline.
 // Network-first for HTML/API so data stays fresh; cache-first for static assets.
 
-const CACHE = 'leadlion-v4';
-const SHELL = ['/app', '/app.html', '/app.js', '/styles.css', '/logo.svg', '/manifest.webmanifest'];
+const CACHE = 'leadlion-v5';
+const SHELL = ['/app', '/app.html', '/app.js', '/styles.css', '/logo.png', '/manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -23,7 +23,7 @@ self.addEventListener('fetch', (e) => {
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/r/')) return;
 
   // Static assets: cache-first.
-  if (['/app.js', '/styles.css', '/logo.svg', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'].includes(url.pathname)) {
+  if (['/app.js', '/styles.css', '/logo.png', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'].includes(url.pathname)) {
     e.respondWith(caches.match(request).then((hit) => hit || fetch(request).then((res) => {
       const copy = res.clone();
       caches.open(CACHE).then((c) => c.put(request, copy));
