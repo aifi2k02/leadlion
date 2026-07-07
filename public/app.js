@@ -970,7 +970,11 @@ async function viewSettings() {
       supabaseUrl: $('#s-surl').value.trim(),
       supabaseKey: $('#s-skey').value.trim(),
     });
+    const btn = $('#save-settings');
+    btn.textContent = '✓ Saved!';
+    btn.style.background = 'var(--green)';
     toast('Settings saved');
+    setTimeout(() => { btn.textContent = 'Save settings'; btn.style.background = ''; }, 2000);
     updateStorageBadge(await initSupabase());
   };
   $('#test-supa').onclick = async () => {
