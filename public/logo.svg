@@ -31,17 +31,17 @@
   <!-- soft muzzle (single, low-contrast — no clown cheeks) -->
   <ellipse cx="32" cy="37.2" rx="6.6" ry="4.8" fill="#fffbeb" opacity="0.55"/>
 
-  <!-- eyes (calm almond) -->
-  <g fill="#3b2a17">
-    <ellipse cx="27.4" cy="28.6" rx="2.2" ry="2.5"/>
-    <ellipse cx="36.6" cy="28.6" rx="2.2" ry="2.5"/>
+  <!-- eyes (fierce, angled almond) -->
+  <g fill="#2e2011">
+    <ellipse cx="27.4" cy="29.0" rx="2.8" ry="1.95" transform="rotate(17 27.4 29.0)"/>
+    <ellipse cx="36.6" cy="29.0" rx="2.8" ry="1.95" transform="rotate(-17 36.6 29.0)"/>
   </g>
-  <circle cx="28.0" cy="27.9" r="0.55" fill="#fff"/>
-  <circle cx="37.2" cy="27.9" r="0.55" fill="#fff"/>
+  <circle cx="27.8" cy="28.4" r="0.5" fill="#fff"/>
+  <circle cx="37.2" cy="28.4" r="0.5" fill="#fff"/>
 
-  <!-- brow ridge shading (subtle fur, not comic arches) -->
-  <path d="M24.8 25.3 Q27.4 24.6 30 25.2" stroke="#c98a3c" stroke-width="1.3" fill="none" stroke-linecap="round" opacity="0.7"/>
-  <path d="M39.2 25.3 Q36.6 24.6 34 25.2" stroke="#c98a3c" stroke-width="1.3" fill="none" stroke-linecap="round" opacity="0.7"/>
+  <!-- brows angled down toward center (fierce, not arched) -->
+  <path d="M23.7 24.4 L30.5 27.2" stroke="#3b2410" stroke-width="2.1" fill="none" stroke-linecap="round"/>
+  <path d="M40.3 24.4 L33.5 27.2" stroke="#3b2410" stroke-width="2.1" fill="none" stroke-linecap="round"/>
 
   <!-- nose: dark lion muzzle, shaped as a map pin (subtle local-leads nod) -->
   <path d="M32 31.4 C30.4 31.4 29.3 32.4 29.3 33.7 C29.3 35.4 32 37.9 32 37.9 C32 37.9 34.7 35.4 34.7 33.7 C34.7 32.4 33.6 31.4 32 31.4 Z" fill="#3b2410"/>
