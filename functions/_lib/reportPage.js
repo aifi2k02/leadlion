@@ -111,6 +111,13 @@ export function renderReportPage(d) {
       ${!ps.finding.ok ? `<div style="margin-top:10px">${findingRow(ps.finding)}</div>` : ''}
     </div>` : ''}
 
+    ${d.reviewInsight ? `<div class="section"><h2>⭐ Review Intelligence</h2>
+      <p style="color:#1a202c;font-size:15px;font-weight:600">${esc(d.reviewInsight.clientHeadline || d.reviewInsight.headline)}</p>
+      <div class="finding" style="margin-top:8px"><span class="ic">💰</span><div><div class="ft">${esc(d.reviewInsight.clientPitch || d.reviewInsight.pitch)}</div></div></div>
+      ${d.reviewInsight.toTarget ? `<div class="finding"><span class="ic">📈</span><div><div class="ft"><b>${d.reviewInsight.toTarget.needed}</b> new 5-star reviews would lift the average to ${d.reviewInsight.toTarget.target}★.</div></div></div>` : ''}
+      <p class="muted" style="font-size:12px;margin-top:8px">Estimated from the public ${esc(String(d.reviewInsight.rating))}★ average across ${d.reviewInsight.count} reviews.</p>
+    </div>` : ''}
+
     ${d.competitors && d.competitors.marketSize ? `<div class="section"><h2>📊 Competitor Benchmark</h2>
       <p style="color:#4a5568;font-size:14px">Ranked <b>#${d.competitors.rankByReviews}</b> of ${d.competitors.marketSize} by review volume for "${esc(d.keyword || '')}" in ${esc(d.location || '')}. Compared to the top ${d.competitors.topN} competitors:</p>
       <div class="meta" style="margin-top:10px">

@@ -201,6 +201,100 @@ const FACTORS = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// Review intelligence — derived purely from the PUBLIC average rating + review
+// count. Google's API only exposes 5 reviews, but the average and total let us
+// bound how many sub-5-star reviews MUST exist:
+//
+//   deficit = (5 - rating) * count          // total stars short of perfect
+//   a 1★ review loses 4 stars, a 4★ loses 1 star
+//   => at least ceil(deficit / 4) reviews are below 5 stars
+//   => at most  floor(deficit)     reviews are below 5 stars
+//
+// Google rounds the displayed rating to 1 decimal, so we use conservative
+// bounds (rating ± 0.05) — the "at least" figure is therefore safe to quote.
+// This is an ESTIMATE, and is labelled as such everywhere it is shown.
+export function reviewInsight(b) {
+  const rating = b.rating;
+  const count = b.reviewCount || 0;
+  if (!rating || count < 5) return null; // too small a sample to claim anything
+
+  const rUp = Math.min(5, rating + 0.05); // most generous reading of the rating
+  const rLo = Math.max(0, rating - 0.05);
+  const deficitMin = (5 - rUp) * count;
+  const deficitMax = (5 - rLo) * count;
+
+  if (deficitMin <= 0.5) {
+    return {
+      tier: 'perfect', rating, count, minBelow5: 0, maxBelow5: 0, toTarget: null,
+      starDeficit: 0,
+      headline: `A near-flawless ${rating}★ across ${count} reviews.`,
+      pitch: 'That reputation is a major asset — and right now it only exists inside Google. A website puts it in front of every customer who searches for them.',
+      clientHeadline: `A near-flawless ${rating}★ across ${count} reviews.`,
+      clientPitch: 'That reputation is a major asset — and right now it only exists inside Google. A website puts it in front of every customer who searches for you.',
+      service: 'Website design',
+    };
+  }
+
+  const minBelow5 = Math.max(1, Math.ceil(deficitMin / 4));
+  const maxBelow5 = Math.min(count, Math.max(minBelow5, Math.floor(deficitMax)));
+
+  // How many new 5★ reviews to reach the 4.5★ trust threshold?
+  //   (rating*count + 5k) / (count + k) >= 4.5  =>  k >= count(4.5 - rating) / 0.5
+  let toTarget = null;
+  if (rating < 4.5) {
+    const needed = Math.ceil((count * (4.5 - rating)) / 0.5);
+    if (needed > 0) toTarget = { target: 4.5, needed };
+  }
+
+  const base = {
+    rating, count,
+    starDeficit: Math.round((5 - rating) * count),
+    minBelow5, maxBelow5, toTarget,
+  };
+  // Natural phrasing: "1–1" and "14–47 of 47" both read badly.
+  const range =
+    maxBelow5 >= count ? `at least ${minBelow5}`
+    : minBelow5 === maxBelow5 ? `an estimated ${minBelow5}`
+    : `an estimated ${minBelow5}–${maxBelow5}`;
+  const one = maxBelow5 === 1; // singular verb agreement
+
+  // Strong reputation: the real pitch is that it's invisible outside Google.
+  if (rating >= 4.7) {
+    return {
+      ...base, tier: 'strong',
+      headline: `Outstanding ${rating}★ from ${count} reviews — though ${range} sit${one ? 's' : ''} below 5 stars.`,
+      pitch: 'A reputation this good is their biggest sales asset, and it currently lives only inside Google. Showcasing it publicly — and replying to the sub-5-star reviews — turns it into new customers.',
+      clientHeadline: `Outstanding ${rating}★ from ${count} reviews — though ${range} sit${one ? 's' : ''} below 5 stars.`,
+      clientPitch: 'A reputation this good is your biggest sales asset, and it currently lives only inside Google. Showcasing it publicly — and replying to the sub-5-star reviews — turns it into new customers.',
+      service: 'Reputation management',
+    };
+  }
+
+  // Below the trust threshold: quantify the campaign.
+  if (toTarget) {
+    const sustained = toTarget.needed > 150 ? ' That is a sustained campaign, not a quick fix — which is exactly why it is worth paying for.' : '';
+    return {
+      ...base, tier: 'weak',
+      headline: `${range.charAt(0).toUpperCase() + range.slice(1)} of their ${count} reviews ${one ? 'is' : 'are'} below 5 stars.`,
+      pitch: `Reaching the 4.5★ trust threshold would take roughly ${toTarget.needed} new 5-star reviews.${sustained}`,
+      clientHeadline: `${range.charAt(0).toUpperCase() + range.slice(1)} of your ${count} reviews ${one ? 'is' : 'are'} below 5 stars.`,
+      // Client copy never contains the agency's own sales rationale.
+      clientPitch: `Reaching the 4.5★ trust threshold — the point most customers stop filtering you out — would take roughly ${toTarget.needed} new 5-star reviews. A structured review-generation programme is the fastest way there.`,
+      service: 'Review generation',
+    };
+  }
+
+  return {
+    ...base, tier: 'ok',
+    headline: `${range.charAt(0).toUpperCase() + range.slice(1)} of their ${count} reviews ${one ? 'is' : 'are'} below 5 stars.`,
+    pitch: 'Every sub-5-star review is among the first things a new customer reads. Replying to them and generating fresh 5-star reviews protects the rating.',
+    clientHeadline: `${range.charAt(0).toUpperCase() + range.slice(1)} of your ${count} reviews ${one ? 'is' : 'are'} below 5 stars.`,
+    clientPitch: 'Every sub-5-star review is among the first things a new customer reads. Replying to them and generating fresh 5-star reviews protects your rating.',
+    service: 'Reputation management',
+  };
+}
+
 export function scoreBusiness(b) {
   let health = 0;
   const findings = [];
@@ -219,6 +313,9 @@ export function scoreBusiness(b) {
     grade,
     findings,
     issues,
+    // Insight only — deliberately NOT a scoring factor (a rating-derived
+    // estimate is too coarse to award points on).
+    reviewInsight: reviewInsight(b),
     services: [...new Set(issues.map((i) => i.service).filter(Boolean))],
   };
 }

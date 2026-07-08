@@ -163,13 +163,21 @@ function buildOutreach(lead) {
     ? `\n\nFor context: you're currently ranked #${c.rankByReviews} of ${c.marketSize} for "${lead.keyword}" in your area — the top ${c.topN} businesses average ${c.avgReviews} reviews, while you have ${lead.reviewCount || 0}. That gap is closable.`
     : '';
 
+  // Review intelligence line — only when it actually strengthens the pitch.
+  const ri = lead.reviewInsight;
+  const reviewLine = ri && ri.tier === 'weak' && ri.toTarget
+    ? `\n\nOn reviews: an estimated ${ri.minBelow5}${ri.maxBelow5 > ri.minBelow5 && ri.maxBelow5 < ri.count ? `–${ri.maxBelow5}` : '+'} of your ${ri.count} reviews sit below 5 stars. Reaching the 4.5★ threshold most customers filter by would take around ${ri.toTarget.needed} new 5-star reviews — that's a campaign we run.`
+    : ri && (ri.tier === 'perfect' || ri.tier === 'strong') && !lead.website
+      ? `\n\nOne more thing: you've earned a ${ri.rating}★ rating from ${ri.count} customers — and none of that is visible to anyone who doesn't already find you on Google. That's a lot of trust going to waste.`
+      : '';
+
   const email = `Subject: Quick question about ${lead.name}'s Google listing
 
 Hi there,
 
 I was searching for "${lead.keyword}" in ${lead.location} and came across ${lead.name}. I ran a quick audit of your Google Business Profile and noticed a few things that are likely costing you customers:
 
-${bullets}${compLine}
+${bullets}${compLine}${reviewLine}
 
 These are all fixable — most within a couple of weeks. I put together a free, no-obligation audit report that shows exactly where you stand against competitors nearby.
 
@@ -693,6 +701,26 @@ function pageSpeedBlock(l) {
 }
 
 // -------- competitor benchmark block (inside lead modal + report)
+// -------- review intelligence block (derived from rating + count, no API call)
+function reviewBlock(l) {
+  const r = l.reviewInsight;
+  if (!r) return '';
+  const icon = r.tier === 'perfect' ? '🏆' : r.tier === 'strong' ? '⭐' : r.tier === 'weak' ? '🔴' : '🟡';
+  return `
+    <h2 style="font-size:15px">Review intelligence <span class="badge badge-muted" style="font-weight:400">estimated</span></h2>
+    <div class="mb">
+      <div class="finding">
+        <span class="icon">${icon}</span>
+        <div>
+          <div>${esc(r.headline)}</div>
+          <div class="pitch">💰 ${esc(r.pitch)}</div>
+        </div>
+      </div>
+      ${r.toTarget ? `<div class="finding"><span class="icon">📈</span><div><b>${r.toTarget.needed}</b> new 5★ reviews needed to reach ${r.toTarget.target}★</div></div>` : ''}
+      ${!r.perfect && r.starDeficit ? `<div class="finding"><span class="icon">📉</span><div class="muted">${r.starDeficit} stars short of a perfect record · derived from the public ${r.rating}★ average across ${r.count} reviews.</div></div>` : ''}
+    </div>`;
+}
+
 function competitorBlock(l) {
   const c = l.competitors;
   if (!c || !c.marketSize) return '';
@@ -740,6 +768,7 @@ async function openLeadModal(lead) {
             </div>`).join('')}
         </div>
         ${l.website ? webAuditBlock(l) : ''}
+        ${reviewBlock(l)}
         ${competitorBlock(l)}
         ${isSaved ? `
           <label>Pipeline status <span id="status-fb" class="save-fb"></span></label>
@@ -1070,6 +1099,15 @@ async function viewReport(id) {
         ${lead.findings.filter((f) => f.ok).map((f) => `<div class="report-finding"><span>✅</span><div>${esc(f.text)}</div></div>`).join('')}
       </div>
 
+      ${lead.reviewInsight ? `
+      <div class="report-section">
+        <h2>⭐ Review Intelligence</h2>
+        <p style="color:#4a5568;font-size:14px"><b>${esc(lead.reviewInsight.clientHeadline || lead.reviewInsight.headline)}</b></p>
+        <div class="report-finding" style="margin-top:8px"><span>💰</span><div>${esc(lead.reviewInsight.clientPitch || lead.reviewInsight.pitch)}</div></div>
+        ${lead.reviewInsight.toTarget ? `<div class="report-finding"><span>📈</span><div><b>${lead.reviewInsight.toTarget.needed}</b> new 5-star reviews would lift the average to ${lead.reviewInsight.toTarget.target}★.</div></div>` : ''}
+        <p style="color:#94a3b8;font-size:12px;margin-top:8px">Estimated from the public ${lead.reviewInsight.rating}★ average across ${lead.reviewInsight.count} reviews.</p>
+      </div>` : ''}
+
       ${lead.webAudit ? `
       <div class="report-section">
         <h2>🌐 Website audit — Grade ${lead.webAudit.grade} (${lead.webAudit.websiteScore}/100)</h2>
@@ -1126,6 +1164,7 @@ function buildReportPayload(lead) {
     findings: lead.findings, services: lead.services,
     webAudit: lead.webAudit || null, pageSpeed: lead.pageSpeed || null,
     competitors: lead.competitors || null,
+    reviewInsight: lead.reviewInsight || null,
     createdAt: new Date().toISOString(),
     agency: { name: s.agencyName || '', tagline: s.agencyTagline || '', email: s.agencyEmail || '', phone: s.agencyPhone || '', website: s.agencyWebsite || '' },
   };
