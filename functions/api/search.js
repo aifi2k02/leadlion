@@ -57,16 +57,18 @@ export async function onRequestPost(context) {
   const ownerKey = isOwner ? (serverKey || (body.apiKey || '').trim()) : serverKey;
   const canLive = (isOwner || account) && ownerKey;
 
-  let deep = !!body.deep;
+  // depth: 'fast' | 'deep' | 'exhaustive'  (legacy: body.deep === true -> 'deep')
+  let depth = ['fast', 'deep', 'exhaustive'].includes(body.depth) ? body.depth : (body.deep ? 'deep' : 'fast');
   let resultCap = null;
   if (account && account.type === 'trial') {
     // Trial limits: enforced here, not on the client.
     if ((account.searchesUsed || 0) >= account.searchLimit) {
       return json({ error: 'Trial search limit reached.', limitReached: true }, 403);
     }
-    deep = false;                        // no deep search on trial
+    depth = 'fast';                      // no grid search on trial
     resultCap = account.resultCap || 20; // cap results
   }
+  const deep = depth !== 'fast';
 
   let businesses;
   let mode;
@@ -74,9 +76,9 @@ export async function onRequestPost(context) {
   if (canLive) {
     try {
       if (deep) {
-        const r = await deepSearch(keyword, location, ownerKey);
+        const r = await deepSearch(keyword, location, ownerKey, depth);
         businesses = r.results;
-        meta = { deep: r.deep, cells: r.cells };
+        meta = { deep: r.deep, cells: r.cells, depth: r.depth, gridN: r.gridN };
       } else {
         businesses = await googleSearch(keyword, location, ownerKey, resultCap ? 1 : 3, resultCap);
       }
@@ -235,7 +237,17 @@ async function mapLimit(items, limit, fn) {
   return results;
 }
 
-async function deepSearch(keyword, location, apiKey) {
+// Grid density adapts to how big the city actually is: each cell targets a
+// roughly fixed geographic size, so Karachi (≈1.0° span) gets a dense grid
+// while a small town gets a cheap one. Google caps each cell query at 60
+// results, so smaller cells = more total unique businesses.
+const DEPTH = {
+  deep:       { cellDeg: 0.12, maxN: 12, pages: 3 },
+  exhaustive: { cellDeg: 0.07, maxN: 12, pages: 3 },
+};
+
+async function deepSearch(keyword, location, apiKey, depth = 'deep') {
+  const cfg = DEPTH[depth] || DEPTH.deep;
   const vp = await geocodeCity(location, apiKey);
   // No bounding box? fall back to the standard 60-result paginated search.
   if (!vp?.low || !vp?.high) {
@@ -244,7 +256,8 @@ async function deepSearch(keyword, location, apiKey) {
 
   const latMin = vp.low.latitude, latMax = vp.high.latitude;
   const lngMin = vp.low.longitude, lngMax = vp.high.longitude;
-  const N = 4; // 4x4 = 16 cells; each cell up to 40 results
+  const span = Math.max(latMax - latMin, lngMax - lngMin);
+  const N = Math.max(4, Math.min(cfg.maxN, Math.round(span / cfg.cellDeg)));
   const dLat = (latMax - latMin) / N;
   const dLng = (lngMax - lngMin) / N;
 
@@ -258,7 +271,7 @@ async function deepSearch(keyword, location, apiKey) {
     }
   }
 
-  const perCell = await mapLimit(cells, 6, (rect) => fetchCell(keyword, rect, apiKey, 2));
+  const perCell = await mapLimit(cells, 8, (rect) => fetchCell(keyword, rect, apiKey, cfg.pages));
 
   const seen = new Set();
   const out = [];
@@ -270,7 +283,7 @@ async function deepSearch(keyword, location, apiKey) {
       }
     }
   }
-  return { results: out, cells: cells.length, deep: true };
+  return { results: out, cells: cells.length, deep: true, depth, gridN: N };
 }
 
 function json(obj, status = 200) {

@@ -348,10 +348,15 @@ async function viewFind() {
         <button id="go">Search</button>
       </div>
       ${feat().deep ? `
-      <label class="flex" style="margin-top:12px;cursor:pointer;font-size:13.5px;color:var(--text)">
-        <input type="checkbox" id="deep" style="width:auto;margin:0" ${lastSearch?.deep ? 'checked' : ''}>
-        <span>🌆 <b>Deep search</b> — scan the whole city grid for hundreds of leads (slower, ~20-40s). Off = fast top 60.</span>
-      </label>` : ''}
+      <div style="margin-top:14px;max-width:420px">
+        <label>Search depth</label>
+        <select id="depth">
+          <option value="fast" ${lastSearch?.depth === 'fast' ? 'selected' : ''}>⚡ Fast — top 60 results (~4s)</option>
+          <option value="deep" ${!lastSearch || lastSearch.depth === 'deep' || lastSearch.deep ? 'selected' : ''}>🌆 Deep — full city grid, hundreds of leads (~10s)</option>
+          <option value="exhaustive" ${lastSearch?.depth === 'exhaustive' ? 'selected' : ''}>🛰️ Exhaustive — maximum coverage (~15s, more API calls)</option>
+        </select>
+        <div class="muted" style="font-size:12px;margin-top:5px">The grid adapts to the city's size — big cities get more zones automatically.</div>
+      </div>` : ''}
       ${isDemo() ? `<p class="muted mt" style="font-size:13px">🧪 Demo mode — sample data only. Enter an access code (Log out → code) for live results.</p>` : ''}
     </div>
     <div id="results"></div>
@@ -379,16 +384,17 @@ async function runSearch() {
   const keyword = $('#kw').value.trim();
   const location = $('#loc').value.trim();
   if (!keyword || !location) return toast('Enter both a keyword and a location');
-  const deep = feat().deep && $('#deep')?.checked;
+  const depth = feat().deep ? ($('#depth')?.value || 'deep') : 'fast';
+  const deep = depth !== 'fast';
   const btn = $('#go');
   btn.disabled = true;
   btn.innerHTML = deep ? '<span class="spinner"></span> Scanning city…' : '<span class="spinner"></span>';
-  if (deep) toast('Deep search scanning the whole city — this takes 20-40s…');
+  if (deep) toast(depth === 'exhaustive' ? 'Exhaustive scan of the whole city — ~15s…' : 'Deep search scanning the city grid — ~10s…');
   try {
     const res = await fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keyword, location, deep, code: accessCode() }),
+      body: JSON.stringify({ keyword, location, depth, code: accessCode() }),
     });
     const data = await res.json();
     if (res.status === 403 && data.limitReached) {
@@ -404,7 +410,7 @@ async function runSearch() {
       renderSessionFoot();
     }
     attachCompetitorStats(data.results);
-    lastSearch = { keyword, location, mode: data.mode, deep: data.deep, cells: data.cells, results: data.results, filters: {} };
+    lastSearch = { keyword, location, mode: data.mode, deep: data.deep, depth, cells: data.cells, gridN: data.gridN, results: data.results, filters: {} };
     renderResults(lastSearch);
   } catch (e) {
     toast('Search error: ' + e.message);
@@ -492,7 +498,7 @@ function renderResults(search) {
   const auditable = search.results.filter((r) => r.website && !r.webAudit).length;
   const audited = search.results.filter((r) => r.webAudit).length;
   $('#results').innerHTML = `
-    ${search.mode === 'demo' ? `<div class="banner banner-warn mt">🧪 Demo data (deterministic sample). Add your Google Places API key in Settings for live business data.</div>` : search.deep ? `<div class="banner banner-info mt">🌆 Deep search — scanned ${search.cells || 16} zones across ${esc(search.location)} and found ${search.results.length} unique businesses.</div>` : `<div class="banner banner-info mt">📡 Live Google data (top 60). Tick <b>Deep search</b> for full-city coverage.</div>`}
+    ${search.mode === 'demo' ? `<div class="banner banner-warn mt">🧪 Demo data (deterministic sample). Add your Google Places API key in Settings for live business data.</div>` : search.deep ? `<div class="banner banner-info mt">${search.depth === 'exhaustive' ? '🛰️ Exhaustive scan' : '🌆 Deep search'} — covered ${esc(search.location)} in a ${search.gridN || '?'}×${search.gridN || '?'} grid (${search.cells} zones) and found ${search.results.length} unique businesses.</div>` : `<div class="banner banner-info mt">📡 Live Google data (top 60). Switch <b>Search depth</b> to Deep for full-city coverage.</div>`}
     <div class="filter-bar">
       <span class="muted" style="font-size:13px">${shown.length} of ${search.results.length} businesses${audited ? ` · ${audited} audited` : ''}</span>
       ${chip('hot', '🔥 Hot leads (55+)', search)}
