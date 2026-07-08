@@ -94,7 +94,18 @@ a user with 20 credits got a 402 and **stranded 20 unspent credits**. `runQuadtr
 now shrinks the batch (and the parallelism) to what the balance can cover.
 Measured: same 30-credit budget went from **120 leads to 278**.
 
-### 12. A quote read aloud to a prospect **must be verbatim**
+### 12. The report page is a **light** document inside a **dark** app
+`.report-page` is `background:#fff; color:#1a202c`. Any component styled with the
+app's theme vars (`var(--text)` = `#e8edf5`) renders **white-on-white** in there.
+The customer quotes shipped invisible exactly this way. Re-state colours under a
+`.report-page .foo { … }` rule. Verify with `getComputedStyle`, not a screenshot.
+
+### 13. The report's closing paragraph must match what was found
+It once told a 95/100 Grade-A listing that we'd "resolve the critical issues
+above" — of which there were none. `ctaCopy()` (app.js) and the `cta` const
+(reportPage.js) branch on critical / opportunity / clean. Keep both in step.
+
+### 14. A quote read aloud to a prospect **must be verbatim**
 Models paraphrase. `verifyQuotes()` normalizes and checks every quote is a real
 substring of a source review; a quote that fails is **dropped** (the theme survives
 without it). Never relax this — an invented customer quote is unrecoverable.

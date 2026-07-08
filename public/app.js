@@ -1579,12 +1579,36 @@ async function viewReport(id) {
 
       <div class="report-cta">
         <h3>Recommended next steps</h3>
-        <p style="font-size:14px;color:#4a5568">${esc(lead.name)} is currently leaving customers on the table. Our recommended priority: <b>${esc([...new Set([...(lead.services || []), ...(lead.webAudit?.issues || []).map((i) => i.service)])].filter(Boolean).join(' → ') || 'GMB optimization')}</b>. ${esc(s.agencyName || 'We')} can typically resolve the critical issues above within 2–4 weeks.</p>
+        <p style="font-size:14px;color:#4a5568">${esc(ctaCopy(lead, s.agencyName))}</p>
         <p style="font-size:14px;margin-top:8px"><b>Contact:</b> ${esc(s.agencyEmail || 'your@email.com')} ${s.agencyPhone ? '· ' + esc(s.agencyPhone) : ''}</p>
       </div>
     </div>
   `;
   renderSharePanel(lead);
+}
+
+// The closing paragraph must match what the report actually found. Telling a
+// 95/100 Grade-A business we'll "resolve the critical issues above" when there
+// are none reads as a form letter — and it is the last thing they read.
+function ctaCopy(lead, agencyName) {
+  const We = agencyName || 'We';   // sentence-initial
+  const we = agencyName || 'we';   // mid-sentence
+  const criticals = (lead.issues || []).filter((i) => i.severity === 'critical').length
+    + (lead.webAudit?.issues || []).filter((i) => i.severity === 'critical').length;
+  const totalIssues = (lead.issues || []).length + (lead.webAudit?.issues || []).length;
+  const services = [...new Set([
+    ...(lead.services || []),
+    ...(lead.webAudit?.issues || []).map((i) => i.service),
+  ])].filter(Boolean).join(' → ') || 'GMB optimization';
+
+  if (criticals > 0) {
+    return `${lead.name} is currently leaving customers on the table. Our recommended priority: ${services}. ${We} can typically resolve the ${criticals} critical issue${criticals === 1 ? '' : 's'} above within 2–4 weeks.`;
+  }
+  if (totalIssues > 0) {
+    const one = totalIssues === 1;
+    return `${lead.name}'s online presence is in good shape — the ${totalIssues} opportunit${one ? 'y' : 'ies'} above ${one ? 'is' : 'are'} the difference between good and dominant. Our recommended priority: ${services}. ${We} can typically deliver ${one ? 'it' : 'these'} within 2–4 weeks.`;
+  }
+  return `${lead.name}'s listing is already performing strongly, and there is nothing urgent to fix. The opportunity now is growth rather than repair — ${we} would focus on ${services} to widen the gap on nearby competitors.`;
 }
 
 // Two voices: everything the prospect sees is stripped of the agency's rationale.

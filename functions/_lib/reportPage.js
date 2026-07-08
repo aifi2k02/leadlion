@@ -21,6 +21,21 @@ export function renderReportPage(d) {
 
   const services = [...new Set([...(d.services || []), ...((w?.issues) || []).map((i) => i.service)])].filter(Boolean).join(' → ') || 'GMB optimization';
 
+  // Match the closing paragraph to what was actually found. A Grade-A listing
+  // told we'll "resolve the critical issues above" reads as a form letter.
+  const criticals = gmbIssues.filter((f) => f.severity === 'critical').length
+    + ((w?.issues) || []).filter((i) => i.severity === 'critical').length;
+  const totalIssues = gmbIssues.length + ((w?.issues) || []).length;
+  const We = a.name || 'We';   // sentence-initial
+  const we = a.name || 'we';   // mid-sentence
+  const one = totalIssues === 1;
+  const cta =
+    criticals > 0
+      ? `${esc(d.name)} is leaving customers on the table. Priority: <b>${esc(services)}</b>. ${esc(We)} can typically resolve the ${criticals} critical issue${criticals === 1 ? '' : 's'} above within 2–4 weeks.`
+      : totalIssues > 0
+        ? `${esc(d.name)}'s online presence is in good shape — the ${totalIssues} opportunit${one ? 'y' : 'ies'} above ${one ? 'is' : 'are'} the difference between good and dominant. Priority: <b>${esc(services)}</b>. ${esc(We)} can typically deliver ${one ? 'it' : 'these'} within 2–4 weeks.`
+        : `${esc(d.name)}'s listing is already performing strongly, and there is nothing urgent to fix. The opportunity now is growth rather than repair — ${esc(we)} would focus on <b>${esc(services)}</b> to widen the gap on nearby competitors.`;
+
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -141,7 +156,7 @@ export function renderReportPage(d) {
 
     <div class="cta">
       <h3>Recommended next steps</h3>
-      <p style="font-size:14px;color:#4a5568">${esc(d.name)} is leaving customers on the table. Priority: <b>${esc(services)}</b>. ${esc(a.name || 'We')} can typically resolve the critical issues above within 2–4 weeks.</p>
+      <p style="font-size:14px;color:#4a5568">${cta}</p>
       ${a.email || a.phone ? `<p style="font-size:14px;margin-top:8px"><b>Get in touch:</b> ${esc(a.email || '')} ${a.phone ? '· ' + esc(a.phone) : ''}</p>` : ''}
       ${a.website ? `<a class="btn" href="${/^https?:/.test(a.website) ? esc(a.website) : 'https://' + esc(a.website)}" target="_blank">Visit ${esc(a.name || 'our site')}</a>` : ''}
     </div>
