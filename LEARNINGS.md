@@ -270,3 +270,96 @@ None of them change the economics, and the economics are the constraint.
 proved the $0 Workers AI approach. Cost metering + BYOK (`_lib/accounts.js`) — made
 a business model possible. The order mattered: mining is the differentiator, BYOK is
 what makes it sellable.
+
+---
+
+## 9. Pending — the actual to-do list
+
+Ordered by *what breaks if you skip it*, not by what's fun. Tick these off here.
+
+### 🔴 Blockers — do before charging anyone money
+
+- [ ] **Add the `AI` binding in Cloudflare.**
+      Pages → Settings → **Bindings** → Add → **Workers AI** → variable name exactly
+      `AI` → Save → **Retry deployment** (bindings don't apply retroactively).
+      Until then review mining silently runs the keyword fallback: no error, just
+      dumber. Verify: the badge on *"What customers actually say"* reads **`AI-read`**,
+      not `keyword`.
+
+- [ ] **Get the real SKU costs.** Billing → Reports, grouped by SKU.
+      Replace the guessed weights in `COST` (`_lib/accounts.js`) — `reviewMine: 10` is
+      an estimate of the Enterprise + Atmosphere ratio. Credit pricing, trial budgets
+      and every dollar figure in the app sit on top of these numbers.
+
+- [ ] **Read the Google Maps Platform Terms of Service.**
+      Nobody has. The app has a **CSV export button** and stores lead lists
+      **indefinitely**; the terms restrict caching Places content beyond 30 days and
+      restrict bulk export/redistribution. A violation kills the key, and every
+      customer's app stops at once. See § 6.
+
+### 🟠 Cost visibility — you are the biggest spender and the only untracked user
+
+`resolveAccess()` returns `account: null` for the owner, so **no ledger exists for
+you**. You spent ~$107 of the $300 credit and the app told you nothing.
+
+- [ ] **Owner ledger.** `acct:__owner__` in the existing KV: `apiBudget: null` (never
+      blocks you) but `apiCallsUsed` accumulating, broken down by endpoint.
+      `authorizeSpend()` already threads an account through every spending path —
+      the owner just needs a record instead of `null`.
+
+- [ ] **Per-search cost in the results banner.**
+      *"278 leads · 187 API calls · ~$3.40"*. `lastSearch.apiCalls` is already
+      captured and then never rendered.
+
+- [ ] **Confirm dialog on Exhaustive.** *"Exhaustive on Karachi ≈ 1,200 API calls
+      (~$22). Continue?"* The most expensive button in the app has no warning on it.
+
+- [ ] **Dashboard cost panel** — calls this month, spend by type, priciest searches.
+      *Do this after the real SKU prices.* Show **call counts as fact and dollars as
+      a labelled estimate** — a wrong number that looks precise is worse than a right
+      number that looks approximate. (Same discipline as `reviewInsight` vs mining.)
+
+### 🟡 BYOK — it's the business model, and buyers never see it
+
+Currently surfaced in five places, all *inside* the app: the Settings card, the
+"using your own key" banner, the trial nudge, three 402 error messages, and the
+admin panel. Landing page: **0 mentions.** Login gate: **0 mentions.**
+
+- [ ] **"Test my key" button** in Settings. Runs a 1-result search and reports
+      success/failure. Today a bad key fails silently at Google **and is metered
+      against your budget** (a malformed key falls back to the server key by design).
+      Smallest item here; prevents a real footgun.
+
+- [ ] **Landing-page BYOK section.** Frame the honesty as the feature:
+      *"$47 once. You bring your own Google key — here's exactly what it costs, and a
+      6-minute setup. No upsells at checkout."* Right now the landing page implies
+      unlimited free searches, which is exactly LeadsGorilla's impression.
+
+- [ ] **First-run prompt** after login: *"Add your Google key now, or explore with
+      credits first?"*
+
+- [ ] **The onboarding wizard.** Not a `<details>` accordion — a wizard. Google Cloud
+      setup is the thing LeadsGorilla buyers complain about, and it's the friction
+      that will kill BYOK conversions. We walked it twice and know the exact traps
+      (see § 1). This is the product, not a chore.
+
+### 🟢 Product quality
+
+- [ ] **Address-grouping for practitioner stubs.** Five "leads" at one Cambridge
+      address. Group by address; collapse into the parent or badge *"same address as
+      N other leads"*. See § 7.
+
+- [ ] **Cap "Audit all websites"** on huge result sets. Tokyo deep returns 6,137 rows.
+
+- [ ] **Fix `Prepared <date>`** — it renders `new Date()` at view time, so an old lead
+      looks freshly prepared. Store `preparedAt` on save.
+
+- [ ] **Supabase leads table.** `schema.sql` is written but never run; leads live in
+      localStorage.
+
+### 🔵 Then the big ones
+
+- [ ] **Demo-website generator** for no-website leads (Gemini Flash).
+- [ ] **Monitoring layer** — *only when a customer asks for it.*
+- [ ] **Landing page rebuild** (`PRD-landing.md`).
+- [ ] **Stripe + Supabase Auth.**
