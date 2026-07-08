@@ -27,7 +27,21 @@ export async function onRequestPost(context) {
       return json({ accounts });
     }
     case 'create': {
-      const a = newTrial({ label: body.label, searches: body.searches, results: body.results, days: body.days });
+      const a = newTrial({
+        label: body.label, searches: body.searches, results: body.results, days: body.days,
+        apiBudget: body.apiBudget, aiCredits: body.aiCredits, deep: body.deep,
+      });
+      await putAccount(kv, a);
+      return json({ account: a });
+    }
+    case 'topup': {
+      // Add credits to an existing account. Grants headroom; never lowers usage.
+      const a = await getAccount(kv, body.code);
+      if (!a) return json({ error: 'Account not found' }, 404);
+      const addApi = Number(body.apiBudget) || 0;
+      const addAi = Number(body.aiCredits) || 0;
+      if (a.apiBudget !== null && addApi) a.apiBudget += addApi;
+      if (a.aiCredits !== null && addAi) a.aiCredits += addAi;
       await putAccount(kv, a);
       return json({ account: a });
     }
@@ -42,6 +56,8 @@ export async function onRequestPost(context) {
       const a = await getAccount(kv, body.code);
       if (!a) return json({ error: 'Account not found' }, 404);
       a.searchesUsed = 0;
+      a.apiCallsUsed = 0;
+      a.aiCreditsUsed = 0;
       await putAccount(kv, a);
       return json({ account: a });
     }

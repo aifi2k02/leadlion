@@ -87,15 +87,21 @@ export async function fetchPage(textQuery, apiKey, pageToken, rectangle) {
 
 // Plain city-wide search, up to 60 results. Used for 'fast' depth and as the
 // fallback when a location can't be resolved to a real place.
+//
+// Returns { places, calls }. `calls` is the number of billed Google requests
+// actually made — the caller reserves an upper bound up front and refunds the
+// difference, so an early `nextPageToken` exit doesn't overcharge the customer.
 export async function googleSearch(keyword, location, apiKey, maxPages = 3, cap = null) {
   const textQuery = `${keyword} in ${location}`;
   const seen = new Set();
   const out = [];
   let pageToken = null;
+  let calls = 0;
 
   for (let page = 0; page < maxPages; page++) {
     let data;
     try {
+      calls++;
       data = await fetchPage(textQuery, apiKey, pageToken);
     } catch (err) {
       if (page === 0) throw err;
@@ -104,12 +110,12 @@ export async function googleSearch(keyword, location, apiKey, maxPages = 3, cap 
     for (const p of data.places || []) {
       if (p.id && !seen.has(p.id)) { seen.add(p.id); out.push(mapPlace(p)); }
     }
-    if (cap && out.length >= cap) return out.slice(0, cap);
+    if (cap && out.length >= cap) return { places: out.slice(0, cap), calls };
     pageToken = data.nextPageToken;
     if (!pageToken) break;
     // Places API (New) validates nextPageToken immediately — no delay needed.
   }
-  return cap ? out.slice(0, cap) : out;
+  return { places: cap ? out.slice(0, cap) : out, calls };
 }
 
 // Search a single zone (strict rectangle), paginating to the 60-result ceiling.

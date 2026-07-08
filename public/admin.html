@@ -60,8 +60,15 @@
           <div style="flex:1;min-width:90px"><label>Searches</label><input id="c-searches" type="number" value="3" min="1"></div>
           <div style="flex:1;min-width:90px"><label>Results/search</label><input id="c-results" type="number" value="20" min="1"></div>
           <div style="flex:1;min-width:90px"><label>Expires (days)</label><input id="c-days" type="number" value="7" min="1"></div>
+          <div style="flex:1;min-width:110px"><label title="1 credit = 1 Google API call">API credits</label><input id="c-api" type="number" value="60" min="0"></div>
+          <div style="flex:1;min-width:110px"><label title="1 credit = 1 review mine or reply draft">AI credits</label><input id="c-ai" type="number" value="0" min="0"></div>
+          <div style="flex:1;min-width:90px"><label>Deep search</label><select id="c-deep"><option value="">No</option><option value="1">Yes</option></select></div>
           <button class="btn" id="create-btn">Create</button>
         </div>
+        <p class="muted" style="font-size:12.5px;margin-top:6px">
+          1 API credit = 1 Google call. A fast search costs ~3, a deep search hundreds, a review mine 10 (Enterprise SKU).
+          A user who adds their own Google key in Settings bypasses the API meter entirely.
+        </p>
         <div class="err" id="create-err"></div>
       </div>
 
@@ -71,8 +78,8 @@
           <button class="btn-ghost" id="refresh">↻ Refresh</button>
         </div>
         <div style="overflow-x:auto"><table id="tbl"><thead><tr>
-          <th>Code</th><th>Label</th><th>Type</th><th>Usage</th><th>Expires</th><th>Status</th><th></th>
-        </tr></thead><tbody id="rows"><tr><td colspan="7" class="muted">Loading…</td></tr></tbody></table></div>
+          <th>Code</th><th>Label</th><th>Type</th><th>Searches</th><th title="Google API calls spent / granted">API credits</th><th title="Review mines + reply drafts">AI credits</th><th>Expires</th><th>Status</th><th></th>
+        </tr></thead><tbody id="rows"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody></table></div>
       </div>
     </div>
   </div>
@@ -99,7 +106,11 @@
 
     $('#create-btn').onclick = async () => {
       const label = $('#c-label').value.trim();
-      const { ok, d } = await api({ action: 'create', label, searches: +$('#c-searches').value, results: +$('#c-results').value, days: +$('#c-days').value });
+      const { ok, d } = await api({
+        action: 'create', label,
+        searches: +$('#c-searches').value, results: +$('#c-results').value, days: +$('#c-days').value,
+        apiBudget: +$('#c-api').value, aiCredits: +$('#c-ai').value, deep: !!$('#c-deep').value,
+      });
       if (!ok) { $('#create-err').textContent = d.error || 'Failed'; return; }
       $('#c-label').value = '';
       toast('Trial created: ' + d.account.code);
@@ -108,19 +119,30 @@
 
     function render(accounts) {
       const rows = $('#rows');
-      if (!accounts.length) { rows.innerHTML = '<tr><td colspan="7" class="muted">No accounts yet.</td></tr>'; return; }
+      if (!accounts.length) { rows.innerHTML = '<tr><td colspan="9" class="muted">No accounts yet.</td></tr>'; return; }
+      // Show spend as used/granted, and colour it when it's nearly gone —
+      // this table is the only place you can see what an account costs you.
+      const meter = (used, granted) => {
+        if (granted === null || granted === undefined) return '<span class="muted">∞</span>';
+        const left = Math.max(0, granted - (used || 0));
+        const cls = left === 0 ? 'b-red' : left / granted < 0.2 ? 'b-red' : '';
+        return `<span class="badge ${cls}">${used || 0}/${granted}</span>`;
+      };
       rows.innerHTML = accounts.map(a => {
         const exp = a.expiresAt ? new Date(a.expiresAt).toLocaleDateString() : '—';
         const expired = a.expiresAt && Date.now() > new Date(a.expiresAt).getTime();
         const status = !a.active ? '<span class="badge b-red">disabled</span>' : expired ? '<span class="badge b-red">expired</span>' : '<span class="badge b-green">active</span>';
         return `<tr>
           <td><code onclick="navigator.clipboard.writeText('${esc(a.code)}');" title="Click to copy">${esc(a.code)}</code></td>
-          <td>${esc(a.label || '')}</td>
+          <td>${esc(a.label || '')}${a.features?.deep ? ' <span class="badge">deep</span>' : ''}</td>
           <td>${esc(a.type)}</td>
           <td>${a.searchesUsed || 0}/${a.searchLimit ?? '∞'}</td>
+          <td>${meter(a.apiCallsUsed, a.apiBudget)}</td>
+          <td>${meter(a.aiCreditsUsed, a.aiCredits)}</td>
           <td>${exp}</td>
           <td>${status}</td>
           <td style="white-space:nowrap;text-align:right">
+            <button class="btn-ghost" data-act="topup" data-code="${esc(a.code)}">Top up</button>
             <button class="btn-ghost" data-act="reset" data-code="${esc(a.code)}">Reset</button>
             <button class="btn-ghost" data-act="revoke" data-code="${esc(a.code)}">${a.active ? 'Disable' : 'Enable'}</button>
             <button class="btn-danger" data-act="delete" data-code="${esc(a.code)}">Delete</button>
@@ -131,6 +153,14 @@
         b.onclick = async () => {
           const act = b.dataset.act, code = b.dataset.code;
           if (act === 'delete' && !confirm('Delete ' + code + '?')) return;
+          if (act === 'topup') {
+            const api_ = prompt('Add how many API credits? (1 credit = 1 Google call)', '60');
+            if (api_ === null) return;
+            const ai_ = prompt('Add how many AI credits? (1 = one review mine or reply)', '10');
+            if (ai_ === null) return;
+            await api({ action: 'topup', code, apiBudget: +api_ || 0, aiCredits: +ai_ || 0 });
+            toast('Credits added'); load(); return;
+          }
           await api({ action: act, code });
           toast(act === 'reset' ? 'Usage reset' : act === 'delete' ? 'Deleted' : 'Toggled');
           load();

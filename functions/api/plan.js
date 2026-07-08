@@ -1,7 +1,7 @@
-import { resolveAccess } from '../_lib/accounts.js';
+import { authorizeSpend, refundApiCalls, apiRemaining, COST } from '../_lib/accounts.js';
 import { geocodeCity, DEPTH } from '../_lib/places.js';
 
-// POST /api/plan { keyword, location, depth, code }
+// POST /api/plan { keyword, location, depth, code, googleKey? }
 //
 // Step 1 of a deep search. Resolves the city and hands the browser the root
 // zones + quadtree config. Costs 1-2 Google calls, far under the 50-subrequest
@@ -17,18 +17,17 @@ export async function onRequestPost(context) {
   const depth = ['deep', 'exhaustive'].includes(body.depth) ? body.depth : 'deep';
   if (!location) return json({ error: 'location is required' }, 400);
 
-  const access = await resolveAccess(context, (body.code || '').trim());
-  if (!access.ok) return json({ error: access.error }, access.status);
-  // Grid search is a full-plan feature. Trials are capped to 'fast'.
-  if (!access.isOwner && !access.account?.features?.deep) {
-    return json({ error: 'Deep search is not available on your plan.' }, 403);
+  // Grid search is a full-plan feature; trials are capped to 'fast'.
+  // Reserve the geocode cost before spending it.
+  const auth = await authorizeSpend(context, body, { estimate: COST.geocode, requireDeep: true });
+  if (!auth.ok) return json({ error: auth.error, outOfCredits: auth.outOfCredits }, auth.status);
+
+  const geo = await geocodeCity(location, auth.key);
+  if (!geo) {
+    // Nothing usable came back — don't charge for a plan we couldn't make.
+    if (auth.reserved) await refundApiCalls(context.env.REPORTS, auth.account, auth.reserved);
+    return json({ cityResolved: false }); // client falls back to a fast search
   }
-
-  const apiKey = context.env.GOOGLE_PLACES_API_KEY;
-  if (!apiKey) return json({ error: 'Search is not configured.' }, 501);
-
-  const geo = await geocodeCity(location, apiKey);
-  if (!geo) return json({ cityResolved: false }); // client falls back to a fast search
 
   const cfg = DEPTH[depth];
   const { low, high } = geo.viewport;
@@ -46,12 +45,20 @@ export async function onRequestPost(context) {
     }
   }
 
+  // Tell the browser how much it can actually afford, so the quadtree can cap
+  // its own budget instead of failing mid-search with a 402.
+  const affordable = auth.account ? apiRemaining(auth.account) : Infinity;
+  const budget = auth.byok || affordable === Infinity ? cfg.budget : Math.min(cfg.budget, affordable);
+
   return json({
     cityResolved: true,
     resolvedCity: geo.address || geo.name,
     resolvedLevel: geo.level || 'city',
     depth,
     zones,
-    config: { maxDepth: cfg.maxDepth, budget: cfg.budget, minSpan: cfg.minSpan },
+    byok: auth.byok,
+    apiRemaining: affordable === Infinity ? null : affordable,
+    budgetCapped: budget < cfg.budget,
+    config: { maxDepth: cfg.maxDepth, budget, minSpan: cfg.minSpan },
   });
 }

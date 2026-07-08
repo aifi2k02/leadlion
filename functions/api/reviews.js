@@ -1,5 +1,8 @@
 import { fetchReviews, mineReviews, draftReply, demoMining } from '../_lib/reviews.js';
-import { resolveAccess } from '../_lib/accounts.js';
+import {
+  resolveAccess, resolveKey, reserveApiCalls, refundApiCalls,
+  spendAiCredits, aiRemaining, apiRemaining, COST, AI_COST,
+} from '../_lib/accounts.js';
 
 // POST /api/reviews
 //   { action: 'mine',  placeId, name, code }        -> mined themes + quotes
@@ -50,22 +53,31 @@ export async function onRequestPost(context) {
   const access = await resolveAccess(context, code);
   if (!access.ok) return json({ error: access.error }, access.status);
 
-  // Review mining is a full-tier feature: it spends the priciest Google SKU.
-  if (!access.isOwner && access.account?.type !== 'full') {
-    return json({ error: 'AI review mining is available on the full plan.' }, 403);
-  }
+  const { account, isOwner } = access;
+  const { key: googleKey, byok } = resolveKey(context, body);
+
+  // Gate on AFFORDABILITY, not on tier. Mining spends two different budgets:
+  // Google's Enterprise SKU (skipped when the customer brings their own key)
+  // and our Workers AI allocation (never skippable). An account that can pay
+  // for both may mine, whatever it's called.
+  const noAi = () =>
+    json({
+      error: `Out of AI credits (${aiRemaining(account)} left). Review mining is available on the full plan, or top up your credits.`,
+      outOfCredits: true,
+    }, 402);
 
   // --- reply drafting: no Google call, so it needs no key -------------------
   if (action === 'reply') {
     const review = sanitizeReview(body.review);
     if (!review.text) return json({ error: 'review.text is required' }, 400);
+    if (account && !(await spendAiCredits(kv, account, AI_COST.reply))) return noAi();
     const result = await draftReply({
       ai,
       businessName: (body.businessName || 'this business').slice(0, 120),
       review,
       tone: typeof body.tone === 'string' && body.tone.trim() ? body.tone.trim().slice(0, 80) : undefined,
     });
-    return json(result);
+    return json({ ...result, aiRemaining: account ? aiRemaining(account) : null });
   }
 
   // --- mining ---------------------------------------------------------------
@@ -73,10 +85,9 @@ export async function onRequestPost(context) {
   if (!placeId || !/^[A-Za-z0-9_-]{5,255}$/.test(placeId)) {
     return json({ error: 'A valid placeId is required' }, 400);
   }
+  if (!googleKey) return json({ error: 'No Google API key is configured on the server.' }, 501);
 
-  const apiKey = context.env.GOOGLE_PLACES_API_KEY;
-  if (!apiKey) return json({ error: 'No Google API key is configured on the server.' }, 501);
-
+  // A cache hit costs nothing — check it BEFORE spending any budget.
   const cacheKey = CACHE_PREFIX + placeId;
   if (kv && !body.refresh) {
     const hit = await kv.get(cacheKey);
@@ -87,10 +98,25 @@ export async function onRequestPost(context) {
     }
   }
 
+  // Reserve the Google spend (Enterprise + Atmosphere SKU, weighted 10x).
+  const metered = !!(account && !byok);
+  if (metered && !(await reserveApiCalls(kv, account, COST.reviewMine))) {
+    return json({
+      error: `Out of API credits (${apiRemaining(account)} left, mining costs ${COST.reviewMine}). Add your own Google API key in Settings.`,
+      outOfCredits: true,
+    }, 402);
+  }
+  // Then the AI spend. If this fails, hand back the Google reservation.
+  if (account && !(await spendAiCredits(kv, account, AI_COST.mine))) {
+    if (metered) await refundApiCalls(kv, account, COST.reviewMine);
+    return noAi();
+  }
+
   let fetched;
   try {
-    fetched = await fetchReviews(placeId, apiKey);
+    fetched = await fetchReviews(placeId, googleKey);
   } catch (err) {
+    if (metered) await refundApiCalls(kv, account, COST.reviewMine);
     return json({ ok: false, error: `Google rejected the review request: ${err.message}` }, 502);
   }
 
@@ -99,9 +125,20 @@ export async function onRequestPost(context) {
 
   if (kv) {
     // Cache even the heuristic result — re-mining costs the Enterprise SKU again.
+    // Cache the mined data ONLY: this KV entry is shared across every account,
+    // so per-account balances must never be written into it.
     context.waitUntil(kv.put(cacheKey, JSON.stringify(result), { expirationTtl: CACHE_TTL }));
   }
-  return json(result);
+
+  // Per-account fields are added to the RESPONSE after caching, never before.
+  return json({
+    ...result,
+    byok,
+    ...(account ? {
+      apiRemaining: account.apiBudget === null ? null : apiRemaining(account),
+      aiRemaining: aiRemaining(account),
+    } : {}),
+  });
 }
 
 function sanitizeReview(r) {

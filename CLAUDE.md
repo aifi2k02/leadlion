@@ -80,7 +80,21 @@ the moment a prospect says "we replied to that one." The AI prompt forbids it
 explicitly; so does the heuristic copy. This was caught in review, after it had
 already been written into the outreach email and the call script.
 
-### 10. A quote read aloud to a prospect **must be verbatim**
+### 10. KV has no atomic increment — reserve *before* you spend
+The credit ledger lives in a KV value, and two concurrent requests can read the
+same counter and both write. So every endpoint **reserves the worst case before
+calling Google, then refunds the difference**. Never charge after the fact: the
+failure mode you want is over-counting the customer, not under-counting your bill.
+Drift is bounded by `BATCHES_IN_PARALLEL`. If it ever needs to be exact, this
+wants a Durable Object, not a KV key.
+
+### 11. A batch reserves all-or-nothing, so size it to the credits left
+`/api/zones` reserves `zones × 3` up front. A 15-zone batch needs 45 credits — so
+a user with 20 credits got a 402 and **stranded 20 unspent credits**. `runQuadtree`
+now shrinks the batch (and the parallelism) to what the balance can cover.
+Measured: same 30-credit budget went from **120 leads to 278**.
+
+### 12. A quote read aloud to a prospect **must be verbatim**
 Models paraphrase. `verifyQuotes()` normalizes and checks every quote is a real
 substring of a source review; a quote that fails is **dropped** (the theme survives
 without it). Never relax this — an invented customer quote is unrecoverable.
@@ -147,6 +161,38 @@ Sukkur unchanged at 24 leads but **20 → 5** API calls.
 | **demo** (no code) | fake | ∞ | 20 | ✗ | ✗ | ✗ |
 | **trial** (issued code) | live | 3 | 20 | ✗ | ✗ | ✗ |
 | **full** (owner) | live | ∞ | ∞ | ✓ | ✓ | ✓ |
+
+### The cost model — two meters, because two things cost money
+
+`_lib/accounts.js`. **1 API credit = 1 Google HTTP call**, the same way Local
+Falcon defines "1 credit = 1 map pin". Metering *searches* rather than *calls* is
+how you sell a $47 licence and receive a $200 bill: a fast search is 3 calls, a
+deep search is hundreds.
+
+| Meter | Charges for | Skipped when |
+|---|---|---|
+| `apiBudget` / `apiCallsUsed` | Google Places calls on **our** key | the customer brings their own key |
+| `aiCredits` / `aiCreditsUsed` | Workers AI (mining, reply drafts) | never — it's always our neurons |
+
+Weights live in `COST`: search page 1 · zone page 1 · geocode 2 · **review mine 10**
+(Place Details + `reviews` bills the Enterprise + Atmosphere SKU). Those weights
+are a documented approximation — **check Billing → Reports before pricing on them.**
+
+Endpoints gate on **affordability, not tier**. An account that can pay for a thing
+may do it, whatever it's called.
+
+### BYOK — bring your own key
+
+The customer's Google key lives in **their browser** (`settings.googleApiKey`) and
+is sent with every request that spends a call. It is **deliberately never persisted
+server-side**: storing customer credentials in KV would mean one KV compromise
+leaks every customer's billable Google key at once.
+
+When a valid-looking key arrives, `resolveKey()` uses it and the API meter is not
+charged — their key, their bill. That is the business model: our cost of goods
+goes to zero, and the one-time licence stops being a liability we sell.
+
+A malformed key falls back to the server key **and is metered** (verified).
 
 - Login gate in `app.js` (`renderGate`/`enterApp`/`boot`), session in localStorage.
 - The **`ADMIN_PASSWORD` secret doubles as the owner's login code.**

@@ -28,6 +28,18 @@ function feat() { return SESSION?.profile?.features || { deep: false, download: 
 function isDemo() { return !SESSION || SESSION.profile?.type === 'demo'; }
 function isTrial() { return SESSION?.profile?.type === 'trial'; }
 
+// BYOK — the user's own Google API key. Deliberately stored in THIS BROWSER and
+// sent with each request, never persisted on our servers: if we kept customer
+// keys in KV, one breach would leak every customer's billable Google credential.
+// When present, their searches bill their Google account, not ours.
+function byokKey() { return (getSettings().googleApiKey || '').trim() || undefined; }
+function hasByok() { return !!byokKey(); }
+
+// Every request that spends a Google API call goes through this.
+function spendBody(extra) {
+  return JSON.stringify({ ...extra, code: accessCode(), googleKey: byokKey() });
+}
+
 // Each session type gets its own lead store so a trial/demo never sees or
 // touches the owner's pipeline. Supabase sync is owner-only.
 function leadsKey() {
@@ -355,7 +367,7 @@ async function viewFind() {
   $('#main').innerHTML = `
     <h1>Find Leads</h1>
     <p class="subtitle">Search any niche in any city — every result is scored by sales opportunity.</p>
-    ${trialBanner()}
+    <div id="tier-banner">${trialBanner()}</div>
     <div class="card">
       <div class="search-row">
         <div class="field"><label>Niche / keyword</label><input id="kw" placeholder="e.g. plumber, dentist, roofing" value="${esc(lastSearch?.keyword || '')}"></div>
@@ -385,14 +397,37 @@ async function viewFind() {
 function trialBanner() {
   const p = SESSION?.profile;
   if (!p) return '';
+
+  // BYOK: their key, their bill — the credit meter no longer applies to them.
+  if (hasByok() && p.type !== 'demo') {
+    return `<div class="banner banner-info mb">🔑 <b>Using your own Google API key</b> — searches are unlimited and billed to your Google account. <a href="#/settings" style="color:var(--accent)">Manage key</a></div>`;
+  }
+
   if (p.type === 'trial') {
     const left = p.remaining ?? p.searchLimit ?? 0;
-    return `<div class="banner banner-warn mb">🎟️ <b>Trial account</b> — ${left} of ${p.searchLimit} searches left · up to ${p.resultCap} results each · exports &amp; sharing are disabled. Ask for full access to unlock everything.</div>`;
+    const api = p.apiRemaining;
+    const credits = api === null || api === undefined
+      ? ''
+      : ` · <b>${api}</b> API credit${api === 1 ? '' : 's'} left`;
+    return `<div class="banner banner-warn mb">🎟️ <b>Trial account</b> — ${left} of ${p.searchLimit} searches left${credits} · up to ${p.resultCap} results each · exports &amp; sharing are disabled.<br><span style="font-size:12.5px">Add your own Google API key in <a href="#/settings" style="color:var(--accent)">Settings</a> for unlimited searches.</span></div>`;
   }
   if (p.type === 'demo') {
     return `<div class="banner banner-warn mb">🧪 <b>Demo mode</b> — sample data only. Log out and enter an access code for live results.</div>`;
   }
   return '';
+}
+
+// Keep the cached session profile's balances in step with what the server just
+// charged us, so the banner doesn't lie until the next login.
+function syncBalances(data) {
+  if (!SESSION?.profile || !data) return;
+  if (data.apiRemaining !== undefined) SESSION.profile.apiRemaining = data.apiRemaining;
+  if (data.aiRemaining !== undefined) SESSION.profile.aiRemaining = data.aiRemaining;
+  if (data.trial?.remaining !== undefined) SESSION.profile.remaining = data.trial.remaining;
+  localStorage.setItem(SESSION_KEY, JSON.stringify(SESSION));
+  // Repaint the banner in place — a stale credit count is worse than none.
+  const el = $('#tier-banner');
+  if (el) el.innerHTML = trialBanner();
 }
 
 // Cloudflare caps a Worker invocation at 50 outbound subrequests, so a deep
@@ -417,35 +452,68 @@ function splitRect(r) {
   ];
 }
 
+// A zone reserves up to 3 pages server-side, all-or-nothing. With few credits
+// left, a full 15-zone batch (45 calls) would be refused even though the user
+// can still afford several zones — so shrink the batch to what they can pay for.
+function affordableBatchSize(creditsLeft) {
+  if (creditsLeft === null || creditsLeft === undefined) return ZONES_PER_REQUEST;
+  return Math.max(0, Math.min(ZONES_PER_REQUEST, Math.floor(creditsLeft / 3)));
+}
+
 async function runQuadtree(keyword, location, plan, onProgress) {
   const { config } = plan;
   const found = new Map();
   let calls = 0, zonesSearched = 0, depthReached = 0, truncatedZones = 0;
+  let outOfCredits = false;
+  // null => unmetered (owner or BYOK). A number => credits left on our key.
+  let credits = plan.byok ? null : (plan.apiRemaining ?? null);
   let frontier = plan.zones.map((rect) => ({ rect, depth: 0 }));
 
+  outer:
   while (frontier.length && calls < config.budget) {
+    const perRequest = affordableBatchSize(credits);
+    if (perRequest === 0) { outOfCredits = true; truncatedZones += frontier.length; break; }
+
     // Chunk this level into server-sized batches, a few in parallel.
     const batches = [];
-    for (let i = 0; i < frontier.length; i += ZONES_PER_REQUEST) batches.push(frontier.slice(i, i + ZONES_PER_REQUEST));
+    for (let i = 0; i < frontier.length; i += perRequest) batches.push(frontier.slice(i, i + perRequest));
 
     const next = [];
-    for (let b = 0; b < batches.length; b += BATCHES_IN_PARALLEL) {
+    for (let b = 0; b < batches.length; ) {
       if (calls >= config.budget) { truncatedZones += batches.slice(b).flat().length; break; }
-      const group = batches.slice(b, b + BATCHES_IN_PARALLEL);
+
+      // Batches in a group fire concurrently and each reserves independently, so
+      // don't launch more of them than the remaining credits can cover — two
+      // parallel 402s would waste a round trip and lose the zones.
+      const par = credits === null
+        ? BATCHES_IN_PARALLEL
+        : Math.max(1, Math.min(BATCHES_IN_PARALLEL, Math.floor(credits / (perRequest * 3))));
+      const group = batches.slice(b, b + par);
+      b += par;
 
       const responses = await Promise.all(group.map(async (batch) => {
         const res = await fetch('/api/zones', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ keyword, location, zones: batch.map((z) => z.rect), code: accessCode() }),
+          body: spendBody({ keyword, location, zones: batch.map((z) => z.rect) }),
         });
         const data = await res.json();
+        // Running out of credits mid-search must NOT throw away the leads we
+        // already paid Google for. Stop, keep what we have, report it honestly.
+        if (res.status === 402) return { batch, data, spent: true };
         if (!res.ok) throw new Error(data.error || 'Zone search failed');
         return { batch, data };
       }));
 
-      for (const { batch, data } of responses) {
+      for (const { batch, data, spent } of responses) {
+        if (spent) { outOfCredits = true; truncatedZones += batch.length; continue; }
         calls += data.calls;
         zonesSearched += data.zonesSearched;
+        syncBalances(data);
+        // Track the server's authoritative balance so the next batch is sized
+        // to what we can actually afford.
+        if (credits !== null && data.apiRemaining !== null && data.apiRemaining !== undefined) {
+          credits = data.apiRemaining;
+        }
         for (const r of data.results) if (!found.has(r.placeId)) found.set(r.placeId, r);
 
         for (const idx of data.saturated) {
@@ -457,15 +525,22 @@ async function runQuadtree(keyword, location, plan, onProgress) {
         for (const z of batch) depthReached = Math.max(depthReached, z.depth);
       }
       onProgress?.({ found: found.size, zonesSearched, calls });
+
+      if (outOfCredits) {
+        // `b` already points past this group, so slice(b) is exactly what's left
+        // unsearched at this level. Plus every child we would have split into.
+        truncatedZones += batches.slice(b).flat().length + next.length;
+        break outer;
+      }
     }
     frontier = next;
   }
-  if (frontier.length) truncatedZones += frontier.length;
+  if (frontier.length && !outOfCredits) truncatedZones += frontier.length;
 
   return {
     results: [...found.values()],
     cells: zonesSearched, apiCalls: calls, depthReached,
-    truncatedZones, incomplete: truncatedZones > 0,
+    truncatedZones, incomplete: truncatedZones > 0, outOfCredits,
   };
 }
 
@@ -482,11 +557,13 @@ async function runSearch() {
     if (depth === 'fast') {
       const res = await fetch('/api/search', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword, location, code: accessCode() }),
+        body: spendBody({ keyword, location }),
       });
       const data = await res.json();
       if (res.status === 403 && data.limitReached) return toast('Trial search limit reached — ask for full access to keep searching.');
+      if (res.status === 402 && data.outOfCredits) return toast(data.error);
       if (!res.ok) throw new Error(data.error || 'Search failed');
+      syncBalances(data);
       if (data.trial && SESSION?.profile) {
         SESSION.profile.remaining = data.trial.remaining;
         SESSION.profile.searchesUsed = data.trial.used;
@@ -501,19 +578,26 @@ async function runSearch() {
     btn.innerHTML = '<span class="spinner"></span> Locating city…';
     const planRes = await fetch('/api/plan', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keyword, location, depth, code: accessCode() }),
+      body: spendBody({ keyword, location, depth }),
     });
     const plan = await planRes.json();
+    if (planRes.status === 402 && plan.outOfCredits) return toast(plan.error);
     if (!planRes.ok) throw new Error(plan.error || 'Could not plan the search');
+    syncBalances(plan);
+    if (plan.budgetCapped) {
+      toast(`Only ${plan.apiRemaining} API credits left — this search will stop early.`);
+    }
 
     if (!plan.cityResolved) {
       // Couldn't pin the city — do a fast search and tell the user why.
       const res = await fetch('/api/search', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword, location, code: accessCode() }),
+        body: spendBody({ keyword, location }),
       });
       const data = await res.json();
+      if (res.status === 402 && data.outOfCredits) return toast(data.error);
       if (!res.ok) throw new Error(data.error || 'Search failed');
+      syncBalances(data);
       attachCompetitorStats(data.results);
       lastSearch = { keyword, location, mode: data.mode, deep: false, depth, cityResolved: false, results: data.results, filters: {} };
       return renderResults(lastSearch);
@@ -529,9 +613,13 @@ async function runSearch() {
       keyword, location, mode: 'live', deep: true, depth,
       cells: q.cells, apiCalls: q.apiCalls, depthReached: q.depthReached,
       incomplete: q.incomplete, truncatedZones: q.truncatedZones,
+      outOfCredits: q.outOfCredits,
       cityResolved: true, resolvedCity: plan.resolvedCity, resolvedLevel: plan.resolvedLevel,
       results: q.results, filters: {},
     };
+    if (q.outOfCredits) {
+      toast(`Ran out of API credits — kept the ${q.results.length} leads already found.`);
+    }
     renderResults(lastSearch);
   } catch (e) {
     toast('Search error: ' + e.message);
@@ -1064,10 +1152,17 @@ async function openLeadModal(lead) {
         const res = await fetch('/api/reviews', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'mine', placeId: l.placeId || l.id, name: l.name, code: accessCode() }),
+          body: spendBody({ action: 'mine', placeId: l.placeId || l.id, name: l.name }),
         });
         const mining = await res.json();
+        if (res.status === 402 && mining.outOfCredits) {
+          toast(mining.error);
+          mineBtn.disabled = false;
+          mineBtn.textContent = 'Mine reviews';
+          return;
+        }
         if (!res.ok) throw new Error(mining.error || 'Mining failed');
+        syncBalances(mining);
         l.reviewMining = mining;
         if (isSaved) await store.update(l.id, { reviewMining: mining });
         if (lastSearch?.results) {
@@ -1646,9 +1741,28 @@ async function viewSettings() {
     </div>
 
     <div class="card mb">
-      <h2 style="margin-top:0">🔑 Google Places API key <span class="badge badge-muted">optional</span></h2>
-      <p class="muted" style="font-size:13.5px">Without a key you get demo data. Get a free key at <code class="inline">console.cloud.google.com</code> → enable <b>Places API (New)</b> → thousands of free searches/month. For production, set it as a Cloudflare Pages secret <code class="inline">GOOGLE_PLACES_API_KEY</code> instead so it never touches the browser.</p>
-      <label>API key</label><input id="s-gkey" type="password" value="${esc(s.googleApiKey || '')}" placeholder="AIza…">
+      <h2 style="margin-top:0">🔑 Your Google API key ${hasByok() ? '<span class="badge" style="background:var(--green);color:#04210f">connected</span>' : '<span class="badge badge-muted">not set</span>'}</h2>
+      <p class="muted" style="font-size:13.5px">
+        Add your own key and your searches become <b>unlimited</b> — they bill your Google account directly, not ours,
+        and we stop counting your API credits.
+      </p>
+      <label>Google API key</label>
+      <input id="s-gkey" type="password" value="${esc(s.googleApiKey || '')}" placeholder="AIza…" autocomplete="off">
+      <p class="muted" style="font-size:12.5px;margin-top:6px">
+        🔒 Stored in <b>this browser only</b> — it is sent with each search but never saved on our servers.
+        Clearing your browser data removes it.
+      </p>
+      <details style="margin-top:10px">
+        <summary class="muted" style="cursor:pointer;font-size:13px">How to get a key (5 minutes)</summary>
+        <ol class="muted" style="font-size:13px;margin:8px 0 0 18px;line-height:1.7">
+          <li>Go to <code class="inline">console.cloud.google.com</code> and create a project.</li>
+          <li>Enable these three APIs: <b>Places API (New)</b>, <b>Geocoding API</b>, <b>PageSpeed Insights API</b>.</li>
+          <li><b>APIs &amp; Services → Credentials → Create credentials → API key.</b></li>
+          <li>Click the key, and under <i>“APIs that can be accessed using this key”</i> restrict it to those three. Press <b>OK</b>, then <b>Save</b> at the bottom of the page — the OK button alone does not save.</li>
+          <li>Paste it above. Google gives new accounts free trial credit; after that you pay Google per search.</li>
+        </ol>
+        <p class="muted" style="font-size:12.5px;margin-top:8px">Leave <b>Application restrictions</b> on <b>None</b> — searches run from our server, so a website restriction would block every request.</p>
+      </details>
     </div>
 
     <div class="card mb">
