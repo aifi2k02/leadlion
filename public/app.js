@@ -410,7 +410,7 @@ async function runSearch() {
       renderSessionFoot();
     }
     attachCompetitorStats(data.results);
-    lastSearch = { keyword, location, mode: data.mode, deep: data.deep, depth, cells: data.cells, gridN: data.gridN, results: data.results, filters: {} };
+    lastSearch = { keyword, location, mode: data.mode, deep: data.deep, depth, cells: data.cells, gridN: data.gridN, cityResolved: data.cityResolved, resolvedCity: data.resolvedCity, resolvedLevel: data.resolvedLevel, results: data.results, filters: {} };
     renderResults(lastSearch);
   } catch (e) {
     toast('Search error: ' + e.message);
@@ -498,7 +498,9 @@ function renderResults(search) {
   const auditable = search.results.filter((r) => r.website && !r.webAudit).length;
   const audited = search.results.filter((r) => r.webAudit).length;
   $('#results').innerHTML = `
-    ${search.mode === 'demo' ? `<div class="banner banner-warn mt">🧪 Demo data (deterministic sample). Add your Google Places API key in Settings for live business data.</div>` : search.deep ? `<div class="banner banner-info mt">${search.depth === 'exhaustive' ? '🛰️ Exhaustive scan' : '🌆 Deep search'} — covered ${esc(search.location)} in a ${search.gridN || '?'}×${search.gridN || '?'} grid (${search.cells} zones) and found ${search.results.length} unique businesses.</div>` : `<div class="banner banner-info mt">📡 Live Google data (top 60). Switch <b>Search depth</b> to Deep for full-city coverage.</div>`}
+    ${search.mode === 'demo' ? `<div class="banner banner-warn mt">🧪 Demo data (deterministic sample). Add your Google Places API key in Settings for live business data.</div>` : search.deep ? `<div class="banner ${search.resolvedLevel === 'area' ? 'banner-warn' : 'banner-info'} mt">${search.depth === 'exhaustive' ? '🛰️ Exhaustive scan' : '🌆 Deep search'} — covered <b>${esc(search.resolvedCity || search.location)}</b> in a ${search.gridN}×${search.gridN} grid (${search.cells} zones) and found ${search.results.length} unique businesses.${search.resolvedLevel === 'area' ? ' <br>⚠️ That matched a <b>district</b>, not a whole city — add a country for full coverage (e.g. “São Paulo, Brazil”).' : ''}</div>`
+      : search.cityResolved === false ? `<div class="banner banner-warn mt">⚠️ Couldn't pin down “${esc(search.location)}” as a city, so we searched the top 60 instead. Add a country or state for full-city coverage — e.g. <b>Springfield, Illinois</b> or <b>Cambridge, UK</b>.</div>`
+      : `<div class="banner banner-info mt">📡 Live Google data (top 60). Switch <b>Search depth</b> to Deep for full-city coverage.</div>`}
     <div class="filter-bar">
       <span class="muted" style="font-size:13px">${shown.length} of ${search.results.length} businesses${audited ? ` · ${audited} audited` : ''}</span>
       ${chip('hot', '🔥 Hot leads (55+)', search)}

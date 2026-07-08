@@ -78,7 +78,10 @@ export async function onRequestPost(context) {
       if (deep) {
         const r = await deepSearch(keyword, location, ownerKey, depth);
         businesses = r.results;
-        meta = { deep: r.deep, cells: r.cells, depth: r.depth, gridN: r.gridN };
+        meta = {
+          deep: r.deep, cells: r.cells, depth: r.depth, gridN: r.gridN,
+          cityResolved: r.cityResolved, resolvedCity: r.resolvedCity, resolvedLevel: r.resolvedLevel,
+        };
       } else {
         businesses = await googleSearch(keyword, location, ownerKey, resultCap ? 1 : 3, resultCap);
       }
@@ -187,21 +190,90 @@ async function googleSearch(keyword, location, apiKey, maxPages = 3, cap = null)
 
 // ---- Deep Search: tile the city into a grid and search each cell ----------
 
-// Get the city's bounding box (viewport) via a single Places lookup — reuses
-// the Places API already enabled, so no extra API to turn on.
-async function geocodeCity(location, apiKey) {
+// Place types ranked from "city-level or bigger" down to "neighbourhood".
+// NOTE: bare 'political' is deliberately excluded — neighbourhoods carry it too,
+// which is how "São Paulo" used to resolve to the Bela Vista district.
+const GEO_TIERS = [
+  ['locality', 'postal_town'],
+  ['administrative_area_level_3', 'administrative_area_level_2', 'administrative_area_level_1'],
+  ['country'],
+  ['sublocality_level_1', 'sublocality', 'neighborhood'], // last resort
+];
+
+function viewportFromGeocoding(vp) {
+  return {
+    low: { latitude: vp.southwest.lat, longitude: vp.southwest.lng },
+    high: { latitude: vp.northeast.lat, longitude: vp.northeast.lng },
+  };
+}
+
+// Primary resolver: the Geocoding API is purpose-built for this and disambiguates
+// correctly worldwide ("Cambridge" -> Cambridge UK, "São Paulo" -> the city).
+// Returns { ok, geo } | { ok:false, reason:'zero'|'unavailable' }.
+async function geocodeViaGeocodingApi(location, apiKey) {
+  try {
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(location)}&key=${apiKey}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    const data = await res.json();
+    if (data.status === 'ZERO_RESULTS') return { ok: false, reason: 'zero' };
+    if (data.status !== 'OK' || !data.results?.length) return { ok: false, reason: 'unavailable' };
+
+    for (const tier of GEO_TIERS) {
+      const hit = data.results.find((r) => (r.types || []).some((t) => tier.includes(t)) && r.geometry?.viewport);
+      if (hit) {
+        return {
+          ok: true,
+          geo: {
+            viewport: viewportFromGeocoding(hit.geometry.viewport),
+            name: hit.formatted_address,
+            address: hit.formatted_address,
+            level: tier.includes('sublocality') ? 'area' : 'city',
+          },
+        };
+      }
+    }
+    return { ok: false, reason: 'zero' };
+  } catch {
+    return { ok: false, reason: 'unavailable' };
+  }
+}
+
+// Fallback resolver: type-filtered Places text search. Works without enabling the
+// Geocoding API, but Places is business-first so it can miss a city entirely.
+async function geocodeViaPlaces(location, apiKey) {
   const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': apiKey,
-      'X-Goog-FieldMask': 'places.viewport,places.location,places.displayName',
+      'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.types,places.viewport',
     },
-    body: JSON.stringify({ textQuery: location, pageSize: 1 }),
+    body: JSON.stringify({ textQuery: location, pageSize: 20 }),
   });
   if (!res.ok) return null;
   const data = await res.json();
-  return data.places?.[0]?.viewport || null;
+  const places = (data.places || []).filter((p) => p.viewport?.low && p.viewport?.high);
+
+  for (const tier of GEO_TIERS) {
+    const hit = places.find((p) => (p.types || []).some((t) => tier.includes(t)));
+    if (hit) {
+      return {
+        viewport: hit.viewport,
+        name: hit.displayName?.text || location,
+        address: hit.formattedAddress || '',
+        level: tier.includes('sublocality') ? 'area' : 'city',
+      };
+    }
+  }
+  return null;
+}
+
+// Resolve a city to its bounding box, best tool first.
+async function geocodeCity(location, apiKey) {
+  const g = await geocodeViaGeocodingApi(location, apiKey);
+  if (g.ok) return g.geo;
+  if (g.reason === 'zero') return null;          // authoritative: no such place
+  return await geocodeViaPlaces(location, apiKey); // Geocoding API not enabled
 }
 
 // Search one grid cell (strict rectangle boundary), paginating up to 2 pages.
@@ -248,11 +320,16 @@ const DEPTH = {
 
 async function deepSearch(keyword, location, apiKey, depth = 'deep') {
   const cfg = DEPTH[depth] || DEPTH.deep;
-  const vp = await geocodeCity(location, apiKey);
-  // No bounding box? fall back to the standard 60-result paginated search.
-  if (!vp?.low || !vp?.high) {
-    return { results: await googleSearch(keyword, location, apiKey), cells: 1, deep: false };
+  const geo = await geocodeCity(location, apiKey);
+  // Couldn't resolve to a real city? Fall back to the standard 60-result search
+  // and tell the client why, so it can prompt for a more specific location.
+  if (!geo) {
+    return {
+      results: await googleSearch(keyword, location, apiKey),
+      cells: 1, deep: false, cityResolved: false,
+    };
   }
+  const vp = geo.viewport;
 
   const latMin = vp.low.latitude, latMax = vp.high.latitude;
   const lngMin = vp.low.longitude, lngMax = vp.high.longitude;
@@ -283,7 +360,12 @@ async function deepSearch(keyword, location, apiKey, depth = 'deep') {
       }
     }
   }
-  return { results: out, cells: cells.length, deep: true, depth, gridN: N };
+  return {
+    results: out, cells: cells.length, deep: true, depth, gridN: N,
+    cityResolved: true, resolvedCity: geo.address || geo.name,
+    // 'area' means we only matched a neighbourhood/district, not a whole city.
+    resolvedLevel: geo.level || 'city',
+  };
 }
 
 function json(obj, status = 200) {
