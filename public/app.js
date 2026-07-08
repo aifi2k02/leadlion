@@ -380,37 +380,143 @@ function trialBanner() {
   return '';
 }
 
+// Cloudflare caps a Worker invocation at 50 outbound subrequests, so a deep
+// quadtree (hundreds of Google calls) can't run in one server request. The
+// browser drives it instead: /api/plan hands us the root zones, then we search
+// them in small batches via /api/zones, subdividing whichever come back
+// saturated. Same algorithm, just orchestrated from here.
+const ZONES_PER_REQUEST = 15;   // matches MAX_ZONES_PER_REQUEST on the server
+const BATCHES_IN_PARALLEL = 3;
+
+function rectSpan(r) {
+  return Math.max(r.high.latitude - r.low.latitude, r.high.longitude - r.low.longitude);
+}
+function splitRect(r) {
+  const mLat = (r.low.latitude + r.high.latitude) / 2;
+  const mLng = (r.low.longitude + r.high.longitude) / 2;
+  return [
+    { low: { latitude: r.low.latitude, longitude: r.low.longitude }, high: { latitude: mLat, longitude: mLng } },
+    { low: { latitude: r.low.latitude, longitude: mLng }, high: { latitude: mLat, longitude: r.high.longitude } },
+    { low: { latitude: mLat, longitude: r.low.longitude }, high: { latitude: r.high.latitude, longitude: mLng } },
+    { low: { latitude: mLat, longitude: mLng }, high: { latitude: r.high.latitude, longitude: r.high.longitude } },
+  ];
+}
+
+async function runQuadtree(keyword, location, plan, onProgress) {
+  const { config } = plan;
+  const found = new Map();
+  let calls = 0, zonesSearched = 0, depthReached = 0, truncatedZones = 0;
+  let frontier = plan.zones.map((rect) => ({ rect, depth: 0 }));
+
+  while (frontier.length && calls < config.budget) {
+    // Chunk this level into server-sized batches, a few in parallel.
+    const batches = [];
+    for (let i = 0; i < frontier.length; i += ZONES_PER_REQUEST) batches.push(frontier.slice(i, i + ZONES_PER_REQUEST));
+
+    const next = [];
+    for (let b = 0; b < batches.length; b += BATCHES_IN_PARALLEL) {
+      if (calls >= config.budget) { truncatedZones += batches.slice(b).flat().length; break; }
+      const group = batches.slice(b, b + BATCHES_IN_PARALLEL);
+
+      const responses = await Promise.all(group.map(async (batch) => {
+        const res = await fetch('/api/zones', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ keyword, location, zones: batch.map((z) => z.rect), code: accessCode() }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Zone search failed');
+        return { batch, data };
+      }));
+
+      for (const { batch, data } of responses) {
+        calls += data.calls;
+        zonesSearched += data.zonesSearched;
+        for (const r of data.results) if (!found.has(r.placeId)) found.set(r.placeId, r);
+
+        for (const idx of data.saturated) {
+          const { rect, depth } = batch[idx];
+          depthReached = Math.max(depthReached, depth);
+          if (depth >= config.maxDepth || rectSpan(rect) < config.minSpan) { truncatedZones++; continue; }
+          for (const kid of splitRect(rect)) next.push({ rect: kid, depth: depth + 1 });
+        }
+        for (const z of batch) depthReached = Math.max(depthReached, z.depth);
+      }
+      onProgress?.({ found: found.size, zonesSearched, calls });
+    }
+    frontier = next;
+  }
+  if (frontier.length) truncatedZones += frontier.length;
+
+  return {
+    results: [...found.values()],
+    cells: zonesSearched, apiCalls: calls, depthReached,
+    truncatedZones, incomplete: truncatedZones > 0,
+  };
+}
+
 async function runSearch() {
   const keyword = $('#kw').value.trim();
   const location = $('#loc').value.trim();
   if (!keyword || !location) return toast('Enter both a keyword and a location');
   const depth = feat().deep ? ($('#depth')?.value || 'deep') : 'fast';
-  const deep = depth !== 'fast';
   const btn = $('#go');
   btn.disabled = true;
-  btn.innerHTML = deep ? '<span class="spinner"></span> Scanning city…' : '<span class="spinner"></span>';
-  if (deep) toast(depth === 'exhaustive' ? 'Exhaustive scan of the whole city — ~15s…' : 'Deep search scanning the city grid — ~10s…');
+  btn.innerHTML = '<span class="spinner"></span>';
+
   try {
-    const res = await fetch('/api/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    if (depth === 'fast') {
+      const res = await fetch('/api/search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword, location, code: accessCode() }),
+      });
+      const data = await res.json();
+      if (res.status === 403 && data.limitReached) return toast('Trial search limit reached — ask for full access to keep searching.');
+      if (!res.ok) throw new Error(data.error || 'Search failed');
+      if (data.trial && SESSION?.profile) {
+        SESSION.profile.remaining = data.trial.remaining;
+        SESSION.profile.searchesUsed = data.trial.used;
+        setSession(SESSION); renderSessionFoot();
+      }
+      attachCompetitorStats(data.results);
+      lastSearch = { keyword, location, mode: data.mode, deep: false, depth, results: data.results, filters: {} };
+      return renderResults(lastSearch);
+    }
+
+    // --- deep / exhaustive: plan, then drive the quadtree from here ---
+    btn.innerHTML = '<span class="spinner"></span> Locating city…';
+    const planRes = await fetch('/api/plan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ keyword, location, depth, code: accessCode() }),
     });
-    const data = await res.json();
-    if (res.status === 403 && data.limitReached) {
-      toast('Trial search limit reached — ask for full access to keep searching.');
-      return;
+    const plan = await planRes.json();
+    if (!planRes.ok) throw new Error(plan.error || 'Could not plan the search');
+
+    if (!plan.cityResolved) {
+      // Couldn't pin the city — do a fast search and tell the user why.
+      const res = await fetch('/api/search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword, location, code: accessCode() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Search failed');
+      attachCompetitorStats(data.results);
+      lastSearch = { keyword, location, mode: data.mode, deep: false, depth, cityResolved: false, results: data.results, filters: {} };
+      return renderResults(lastSearch);
     }
-    if (!res.ok) throw new Error(data.error || 'Search failed');
-    // update trial remaining count in the session
-    if (data.trial && SESSION?.profile) {
-      SESSION.profile.remaining = data.trial.remaining;
-      SESSION.profile.searchesUsed = data.trial.used;
-      setSession(SESSION);
-      renderSessionFoot();
-    }
-    attachCompetitorStats(data.results);
-    lastSearch = { keyword, location, mode: data.mode, deep: data.deep, depth, cells: data.cells, gridN: data.gridN, cityResolved: data.cityResolved, resolvedCity: data.resolvedCity, resolvedLevel: data.resolvedLevel, results: data.results, filters: {} };
+
+    const q = await runQuadtree(keyword, location, plan, ({ found, zonesSearched }) => {
+      btn.innerHTML = `<span class="spinner"></span> ${found} found · ${zonesSearched} zones`;
+    });
+
+    attachCompetitorStats(q.results);
+    q.results.sort((a, b) => b.opportunityScore - a.opportunityScore);
+    lastSearch = {
+      keyword, location, mode: 'live', deep: true, depth,
+      cells: q.cells, apiCalls: q.apiCalls, depthReached: q.depthReached,
+      incomplete: q.incomplete, truncatedZones: q.truncatedZones,
+      cityResolved: true, resolvedCity: plan.resolvedCity, resolvedLevel: plan.resolvedLevel,
+      results: q.results, filters: {},
+    };
     renderResults(lastSearch);
   } catch (e) {
     toast('Search error: ' + e.message);
@@ -498,7 +604,7 @@ function renderResults(search) {
   const auditable = search.results.filter((r) => r.website && !r.webAudit).length;
   const audited = search.results.filter((r) => r.webAudit).length;
   $('#results').innerHTML = `
-    ${search.mode === 'demo' ? `<div class="banner banner-warn mt">🧪 Demo data (deterministic sample). Add your Google Places API key in Settings for live business data.</div>` : search.deep ? `<div class="banner ${search.resolvedLevel === 'area' ? 'banner-warn' : 'banner-info'} mt">${search.depth === 'exhaustive' ? '🛰️ Exhaustive scan' : '🌆 Deep search'} — covered <b>${esc(search.resolvedCity || search.location)}</b> in a ${search.gridN}×${search.gridN} grid (${search.cells} zones) and found ${search.results.length} unique businesses.${search.resolvedLevel === 'area' ? ' <br>⚠️ That matched a <b>district</b>, not a whole city — add a country for full coverage (e.g. “São Paulo, Brazil”).' : ''}</div>`
+    ${search.mode === 'demo' ? `<div class="banner banner-warn mt">🧪 Demo data (deterministic sample). Add your Google Places API key in Settings for live business data.</div>` : search.deep ? `<div class="banner ${search.resolvedLevel === 'area' || search.incomplete ? 'banner-warn' : 'banner-info'} mt">${search.depth === 'exhaustive' ? '🛰️ Exhaustive scan' : '🌆 Deep search'} — covered <b>${esc(search.resolvedCity || search.location)}</b>, subdividing into ${search.cells} zones (depth ${search.depthReached}) and found ${search.results.length} unique businesses.${search.incomplete ? ` <br>⚠️ ${search.truncatedZones} zone${search.truncatedZones === 1 ? ' is' : 's are'} still denser than we can see — try <b>Exhaustive</b>, or search a narrower area.` : ''}${search.resolvedLevel === 'area' ? ' <br>⚠️ That matched a <b>district</b>, not a whole city — add a country for full coverage (e.g. “São Paulo, Brazil”).' : ''}</div>`
       : search.cityResolved === false ? `<div class="banner banner-warn mt">⚠️ Couldn't pin down “${esc(search.location)}” as a city, so we searched the top 60 instead. Add a country or state for full-city coverage — e.g. <b>Springfield, Illinois</b> or <b>Cambridge, UK</b>.</div>`
       : `<div class="banner banner-info mt">📡 Live Google data (top 60). Switch <b>Search depth</b> to Deep for full-city coverage.</div>`}
     <div class="filter-bar">

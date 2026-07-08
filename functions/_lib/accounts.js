@@ -67,6 +67,21 @@ export function profileOf(a) {
   };
 }
 
+// Resolve an access code to a tier. Used by every endpoint that spends the
+// owner's Google quota. Returns { ok:true, isOwner, account } or { ok:false, ... }.
+export async function resolveAccess(context, code) {
+  const isOwner = !!(context.env.ADMIN_PASSWORD && code === context.env.ADMIN_PASSWORD);
+  if (isOwner) return { ok: true, isOwner: true, account: null };
+
+  const kv = context.env.REPORTS;
+  if (!code || !kv) return { ok: false, status: 401, error: 'An access code is required.' };
+
+  const account = await getAccount(kv, code);
+  if (!account || !account.active) return { ok: false, status: 401, error: 'Invalid or deactivated access code.' };
+  if (isExpired(account)) return { ok: false, status: 403, error: 'This trial has expired.' };
+  return { ok: true, isOwner: false, account };
+}
+
 export function fullProfile() {
   return {
     code: 'OWNER', label: 'Full access', type: 'full',

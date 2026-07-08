@@ -1,31 +1,18 @@
 import { scoreBusiness } from '../_lib/scoring.js';
 import { demoSearch } from '../_lib/demo.js';
 import { getAccount, isExpired, putAccount } from '../_lib/accounts.js';
+import { googleSearch } from '../_lib/places.js';
 
-// POST /api/search  { keyword, location, apiKey? }
-// Uses (in priority order): server env key -> user-supplied key -> demo data.
-// Key never appears in responses.
+// POST /api/search { keyword, location, code }
+//
+// Handles the single-request paths only: demo data, and the 'fast' (top-60)
+// live search. Deep/exhaustive searches are driven by the browser via
+// /api/plan + /api/zones, because Cloudflare caps a Worker invocation at 50
+// outbound subrequests and a full quadtree needs hundreds.
 
-const FIELD_MASK = [
-  'places.id',
-  'places.displayName',
-  'places.formattedAddress',
-  'places.rating',
-  'places.userRatingCount',
-  'places.websiteUri',
-  'places.nationalPhoneNumber',
-  'places.internationalPhoneNumber',
-  'places.businessStatus',
-  'places.photos',
-  'places.regularOpeningHours',
-  'places.googleMapsUri',
-  'places.primaryTypeDisplayName',
-  'places.editorialSummary',
-  'places.location',
-  'nextPageToken', // enables pagination (top-level, no places. prefix)
-].join(',');
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function json(obj, status = 200) {
+  return new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } });
+}
 
 export async function onRequestPost(context) {
   let body;
@@ -57,34 +44,21 @@ export async function onRequestPost(context) {
   const ownerKey = isOwner ? (serverKey || (body.apiKey || '').trim()) : serverKey;
   const canLive = (isOwner || account) && ownerKey;
 
-  // depth: 'fast' | 'deep' | 'exhaustive'  (legacy: body.deep === true -> 'deep')
-  let depth = ['fast', 'deep', 'exhaustive'].includes(body.depth) ? body.depth : (body.deep ? 'deep' : 'fast');
   let resultCap = null;
   if (account && account.type === 'trial') {
     // Trial limits: enforced here, not on the client.
     if ((account.searchesUsed || 0) >= account.searchLimit) {
       return json({ error: 'Trial search limit reached.', limitReached: true }, 403);
     }
-    depth = 'fast';                      // no grid search on trial
-    resultCap = account.resultCap || 20; // cap results
+    resultCap = account.resultCap || 20;
   }
-  const deep = depth !== 'fast';
 
   let businesses;
   let mode;
   let meta = {};
   if (canLive) {
     try {
-      if (deep) {
-        const r = await deepSearch(keyword, location, ownerKey, depth);
-        businesses = r.results;
-        meta = {
-          deep: r.deep, cells: r.cells, depth: r.depth, gridN: r.gridN,
-          cityResolved: r.cityResolved, resolvedCity: r.resolvedCity, resolvedLevel: r.resolvedLevel,
-        };
-      } else {
-        businesses = await googleSearch(keyword, location, ownerKey, resultCap ? 1 : 3, resultCap);
-      }
+      businesses = await googleSearch(keyword, location, ownerKey, resultCap ? 1 : 3, resultCap);
       mode = 'live';
     } catch (err) {
       return json({ error: `Google Places error: ${err.message}` }, 502);
@@ -109,268 +83,4 @@ export async function onRequestPost(context) {
     .sort((a, b) => b.opportunityScore - a.opportunityScore);
 
   return json({ mode, count: results.length, ...meta, results });
-}
-
-function mapPlace(p) {
-  return {
-    placeId: p.id,
-    demo: false,
-    name: p.displayName?.text || 'Unknown',
-    address: p.formattedAddress || '',
-    category: p.primaryTypeDisplayName?.text || null,
-    rating: p.rating || null,
-    reviewCount: p.userRatingCount || 0,
-    website: p.websiteUri || null,
-    phone: p.nationalPhoneNumber || null,
-    phoneIntl: p.internationalPhoneNumber || null,
-    photoCount: (p.photos || []).length,
-    hasHours: !!p.regularOpeningHours,
-    // Places API doesn't expose claimed status; heuristic: no website, no
-    // hours and <3 photos usually means an auto-generated unclaimed listing.
-    claimed: !(!p.websiteUri && !p.regularOpeningHours && (p.photos || []).length < 3),
-    description: p.editorialSummary?.text || null,
-    businessStatus: p.businessStatus || 'OPERATIONAL',
-    mapsUrl: p.googleMapsUri || null,
-    lat: p.location?.latitude ?? null,
-    lng: p.location?.longitude ?? null,
-  };
-}
-
-async function fetchPage(textQuery, apiKey, pageToken, rectangle) {
-  const body = { textQuery, pageSize: 20 };
-  if (pageToken) body.pageToken = pageToken;
-  if (rectangle) body.locationRestriction = { rectangle };
-  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Goog-Api-Key': apiKey,
-      'X-Goog-FieldMask': FIELD_MASK,
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const detail = await res.json().catch(() => ({}));
-    const err = new Error(detail?.error?.message || `HTTP ${res.status}`);
-    err.status = res.status;
-    throw err;
-  }
-  return res.json();
-}
-
-// Google Text Search caps a single query at 60 results (3 pages of 20).
-// We paginate through all available pages and dedupe by place id.
-async function googleSearch(keyword, location, apiKey, maxPages = 3, cap = null) {
-  const textQuery = `${keyword} in ${location}`;
-  const seen = new Set();
-  const out = [];
-  let pageToken = null;
-
-  for (let page = 0; page < maxPages; page++) {
-    let data;
-    try {
-      data = await fetchPage(textQuery, apiKey, pageToken);
-    } catch (err) {
-      if (page === 0) throw err; // first page failing = real error
-      break; // later page failed (e.g. token not ready) — return what we have
-    }
-    for (const p of data.places || []) {
-      if (p.id && !seen.has(p.id)) {
-        seen.add(p.id);
-        out.push(mapPlace(p));
-      }
-    }
-    if (cap && out.length >= cap) return out.slice(0, cap);
-    pageToken = data.nextPageToken;
-    if (!pageToken) break;
-    await sleep(1500); // let Google validate the next page token
-  }
-  return cap ? out.slice(0, cap) : out;
-}
-
-// ---- Deep Search: tile the city into a grid and search each cell ----------
-
-// Place types ranked from "city-level or bigger" down to "neighbourhood".
-// NOTE: bare 'political' is deliberately excluded — neighbourhoods carry it too,
-// which is how "São Paulo" used to resolve to the Bela Vista district.
-const GEO_TIERS = [
-  ['locality', 'postal_town'],
-  ['administrative_area_level_3', 'administrative_area_level_2', 'administrative_area_level_1'],
-  ['country'],
-  ['sublocality_level_1', 'sublocality', 'neighborhood'], // last resort
-];
-
-function viewportFromGeocoding(vp) {
-  return {
-    low: { latitude: vp.southwest.lat, longitude: vp.southwest.lng },
-    high: { latitude: vp.northeast.lat, longitude: vp.northeast.lng },
-  };
-}
-
-// Primary resolver: the Geocoding API is purpose-built for this and disambiguates
-// correctly worldwide ("Cambridge" -> Cambridge UK, "São Paulo" -> the city).
-// Returns { ok, geo } | { ok:false, reason:'zero'|'unavailable' }.
-async function geocodeViaGeocodingApi(location, apiKey) {
-  try {
-    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(location)}&key=${apiKey}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    const data = await res.json();
-    if (data.status === 'ZERO_RESULTS') return { ok: false, reason: 'zero' };
-    if (data.status !== 'OK' || !data.results?.length) return { ok: false, reason: 'unavailable' };
-
-    for (const tier of GEO_TIERS) {
-      const hit = data.results.find((r) => (r.types || []).some((t) => tier.includes(t)) && r.geometry?.viewport);
-      if (hit) {
-        return {
-          ok: true,
-          geo: {
-            viewport: viewportFromGeocoding(hit.geometry.viewport),
-            name: hit.formatted_address,
-            address: hit.formatted_address,
-            level: tier.includes('sublocality') ? 'area' : 'city',
-          },
-        };
-      }
-    }
-    return { ok: false, reason: 'zero' };
-  } catch {
-    return { ok: false, reason: 'unavailable' };
-  }
-}
-
-// Fallback resolver: type-filtered Places text search. Works without enabling the
-// Geocoding API, but Places is business-first so it can miss a city entirely.
-async function geocodeViaPlaces(location, apiKey) {
-  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Goog-Api-Key': apiKey,
-      'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.types,places.viewport',
-    },
-    body: JSON.stringify({ textQuery: location, pageSize: 20 }),
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  const places = (data.places || []).filter((p) => p.viewport?.low && p.viewport?.high);
-
-  for (const tier of GEO_TIERS) {
-    const hit = places.find((p) => (p.types || []).some((t) => tier.includes(t)));
-    if (hit) {
-      return {
-        viewport: hit.viewport,
-        name: hit.displayName?.text || location,
-        address: hit.formattedAddress || '',
-        level: tier.includes('sublocality') ? 'area' : 'city',
-      };
-    }
-  }
-  return null;
-}
-
-// Resolve a city to its bounding box, best tool first.
-async function geocodeCity(location, apiKey) {
-  const g = await geocodeViaGeocodingApi(location, apiKey);
-  if (g.ok) return g.geo;
-  if (g.reason === 'zero') return null;          // authoritative: no such place
-  return await geocodeViaPlaces(location, apiKey); // Geocoding API not enabled
-}
-
-// Search one grid cell (strict rectangle boundary), paginating up to 2 pages.
-async function fetchCell(keyword, rectangle, apiKey, maxPages = 2) {
-  const out = [];
-  let token = null;
-  for (let p = 0; p < maxPages; p++) {
-    let data;
-    try {
-      data = await fetchPage(keyword, apiKey, token, rectangle);
-    } catch {
-      break;
-    }
-    for (const place of data.places || []) out.push(mapPlace(place));
-    token = data.nextPageToken;
-    if (!token) break;
-    await sleep(1500);
-  }
-  return out;
-}
-
-// Concurrency-limited map.
-async function mapLimit(items, limit, fn) {
-  const results = [];
-  const queue = items.map((it, i) => [it, i]);
-  const worker = async () => {
-    while (queue.length) {
-      const [it, i] = queue.shift();
-      results[i] = await fn(it, i);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length || 1) }, worker));
-  return results;
-}
-
-// Grid density adapts to how big the city actually is: each cell targets a
-// roughly fixed geographic size, so Karachi (≈1.0° span) gets a dense grid
-// while a small town gets a cheap one. Google caps each cell query at 60
-// results, so smaller cells = more total unique businesses.
-const DEPTH = {
-  deep:       { cellDeg: 0.12, maxN: 12, pages: 3 },
-  exhaustive: { cellDeg: 0.07, maxN: 12, pages: 3 },
-};
-
-async function deepSearch(keyword, location, apiKey, depth = 'deep') {
-  const cfg = DEPTH[depth] || DEPTH.deep;
-  const geo = await geocodeCity(location, apiKey);
-  // Couldn't resolve to a real city? Fall back to the standard 60-result search
-  // and tell the client why, so it can prompt for a more specific location.
-  if (!geo) {
-    return {
-      results: await googleSearch(keyword, location, apiKey),
-      cells: 1, deep: false, cityResolved: false,
-    };
-  }
-  const vp = geo.viewport;
-
-  const latMin = vp.low.latitude, latMax = vp.high.latitude;
-  const lngMin = vp.low.longitude, lngMax = vp.high.longitude;
-  const span = Math.max(latMax - latMin, lngMax - lngMin);
-  const N = Math.max(4, Math.min(cfg.maxN, Math.round(span / cfg.cellDeg)));
-  const dLat = (latMax - latMin) / N;
-  const dLng = (lngMax - lngMin) / N;
-
-  const cells = [];
-  for (let i = 0; i < N; i++) {
-    for (let j = 0; j < N; j++) {
-      cells.push({
-        low: { latitude: latMin + i * dLat, longitude: lngMin + j * dLng },
-        high: { latitude: latMin + (i + 1) * dLat, longitude: lngMin + (j + 1) * dLng },
-      });
-    }
-  }
-
-  const perCell = await mapLimit(cells, 8, (rect) => fetchCell(keyword, rect, apiKey, cfg.pages));
-
-  const seen = new Set();
-  const out = [];
-  for (const arr of perCell) {
-    for (const b of arr) {
-      if (b.placeId && !seen.has(b.placeId)) {
-        seen.add(b.placeId);
-        out.push(b);
-      }
-    }
-  }
-  return {
-    results: out, cells: cells.length, deep: true, depth, gridN: N,
-    cityResolved: true, resolvedCity: geo.address || geo.name,
-    // 'area' means we only matched a neighbourhood/district, not a whole city.
-    resolvedLevel: geo.level || 'city',
-  };
-}
-
-function json(obj, status = 200) {
-  return new Response(JSON.stringify(obj), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
 }
