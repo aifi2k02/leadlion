@@ -3,6 +3,11 @@
 Local-business lead generation for marketing agencies. A self-hosted, zero-cost
 alternative to LeadsGorilla. **Live at https://leadlion.pages.dev** (app at `/app`).
 
+> **This file: what you must know to change the code without breaking it.**
+> For *why* the product and pricing are shaped this way — the competitor research,
+> the cost model's derivation, the open ToS risk, and the roadmap — see
+> [`LEARNINGS.md`](LEARNINGS.md). Keep each fact in exactly one file.
+
 ---
 
 ## ⚠️ Hard-won gotchas — read before changing anything
@@ -309,11 +314,5 @@ counts, don't rely on local tests to catch them.
 
 ## Roadmap
 
-1. **AI layer** on free Cloudflare Workers AI + Gemini Flash free tier.
-   ✅ *Review mining + reply drafting shipped* (`_lib/reviews.js`) — this proved the
-   $0 Workers AI approach. Next, the killer feature: **auto-generating a demo
-   website** for no-website leads (Gemini Flash is the better fit for that).
-2. **Landing page rebuild** to Awwwards standard — spec in `PRD-landing.md`.
-3. **SaaS-ify:** Supabase Auth + Stripe. The trial/admin system is the groundwork.
-4. Gaps vs LeadsGorilla worth considering: Facebook as a second source,
-   built-in email sequences (SMTP), AI copywriting.
+See [`LEARNINGS.md` § 8](LEARNINGS.md) — it's sequenced by what the business needs,
+with the reasoning for each ordering decision. Landing-page spec: `PRD-landing.md`.

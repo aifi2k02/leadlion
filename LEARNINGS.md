@@ -1,7 +1,17 @@
 # LeadLion — Learnings
 
-Everything that cost time, money, or credibility to find out. `CLAUDE.md` is the
-engineering reference; this is the record of *how we know* what's in it.
+**Why the product and the business are shaped the way they are.**
+
+Two files, each fact in exactly one of them — so neither can drift:
+
+| File | Answers | When to read it |
+|---|---|---|
+| **`CLAUDE.md`** | *What must I know to change the code without breaking it?* | Before touching the code. Loaded into Claude's context **every session**, so it stays tight. |
+| **`LEARNINGS.md`** (this) | *Why is it built this way, and what does it cost?* | Before a product, pricing, or "should we ship this" decision. |
+
+Anything a coder needs mid-edit belongs in `CLAUDE.md`. Anything you'd want before
+deciding what to build or what to charge belongs here. **§3 and §4 are indexes into
+`CLAUDE.md`, not copies of it.**
 
 Last updated: 2026-07-09.
 
@@ -114,129 +124,65 @@ is a guess at the Enterprise-SKU ratio. Verify before pricing on it.
 
 ---
 
-## 3. Hard-won technical facts
+## 3. Technical facts — index
 
-Full detail in `CLAUDE.md`. The ones that were genuinely surprising:
+**These live in `CLAUDE.md`, which is the single source of truth.** Duplicating them
+here would guarantee the two files drift and neither could be trusted. This is a
+map, not a copy.
 
-### Cloudflare caps a Worker at 50 outbound subrequests
-Fails at request #51. **`wrangler pages dev` has no such cap** — server-side fan-out
-passes every local test and breaks in production. This shipped once. KV reads don't
-count. Anything needing >45 calls must be split across HTTP requests and driven by
-the browser (`/api/plan` + `/api/zones`).
+| # | Fact | Why it mattered |
+|---|---|---|
+| 1 | Cloudflare caps a Worker at **50 outbound subrequests** | Passed every local test; broke in production. `wrangler pages dev` has no such cap. Forced the whole client-orchestrated quadtree. |
+| 2 | The service worker caches `app.js` **cache-first** | Wasted time twice in one session. Bump `CACHE` on every deploy. |
+| 3 | Places API (New) needs **no delay** between pages | A legacy-API habit was costing ~2/3 of search time. |
+| 4 | Places text search is **not a geocoder** | `"Cambridge"` → a clothing store in a Karachi mall. |
+| 5 | Ad blockers hide elements with generic ids | `id="login"` rendered the admin page blank, even in incognito. |
+| 6 | `style.display = ''` reverts to the stylesheet | Admin panel stayed blank after a successful login. |
+| 7 | Asking Places for `reviews` switches to the **priciest SKU** | Would have billed Enterprise + Atmosphere on every row of a 1,604-lead search. |
+| 8 | Workers AI returns `response` as an **object** on some models | `String(raw)` silently yields `"[object Object]"`. |
+| 9 | Google exposes **no owner-reply field** | We cannot know if a review was answered. Never claim it. |
+| 10 | **KV has no atomic increment** — reserve before you spend | Over-count the customer, never under-count your bill. |
+| 11 | A batch reserves **all-or-nothing** — size it to the credits left | Stranded 20 credits. Fixing it took 120 leads → **278** on the same budget. |
+| 12 | The report page is a **light** document inside a **dark** app | The customer quotes shipped invisible, white-on-white. |
+| 13 | The closing CTA must match what was found | Told a Grade-A listing we'd fix "the critical issues above". There were none. |
+| 14 | A quote read aloud to a prospect **must be verbatim** | Models paraphrase. An invented customer quote is unrecoverable. |
 
-### KV has no atomic increment
-Two concurrent requests can read the same counter and both write. So every endpoint
-**reserves the worst case before calling Google, then refunds the difference.**
-Never charge after the fact: the failure mode you want is over-counting the
-customer, not under-counting your bill. Exact accounting needs a Durable Object.
+Two more, not in `CLAUDE.md` because they're about the toolchain, not the code:
 
-### All-or-nothing reservations strand credits
-`/api/zones` reserves `zones × 3` up front. A 15-zone batch needs 45 credits — so a
-user holding 20 credits was refused and **stranded all 20**. Sizing the batch and
-the parallelism to the balance took the same 30-credit budget from **120 leads to
-278**. Any reservation scheme needs this.
-
-### Places text search is not a geocoder
-It's business-first. `"Cambridge"` resolved to a *clothing store in a Karachi mall*.
-`"São Paulo"` to the Bela Vista district — the bare `political` type also matches
-neighbourhoods. Use the Geocoding API first, with a type-priority Places fallback.
-
-### Places API (New) needs no delay between pagination pages
-`nextPageToken` validates immediately. A 1.5s sleep (a legacy-API habit) was costing
-~2/3 of total search time.
-
-### Google exposes no owner-reply field on reviews
-There is no "business responded" property. **Never write copy claiming a review is
-"unanswered."** We cannot know, and the pitch dies the moment a prospect says "we
-replied to that one." This had already been written into the outreach email *and*
-the call script before it was caught.
-
-### Google exposes only 5 reviews per business
-And they're the "most relevant" — positivity-skewed, no sort-by-worst. Mining a
-400-review business reads 5 of them. It finds *some* complaints, never all. Say so
-on every surface.
-
-### Workers AI returns `response` as an object on some models
-`llama-3.3-70b` hands back an already-parsed object; `String(raw)` yields
-`"[object Object]"`. `llama-3.1-8b` returns a JSON string that can be truncated at
-`max_tokens`. Handle object passthrough, fence stripping, and bracket repair.
-
-### A quote read aloud to a prospect must be verbatim
-Models paraphrase. `verifyQuotes()` drops any quote that isn't a real substring of a
-source review — theme survives, quote doesn't. **Never relax this.** An invented
-customer quote is unrecoverable.
-
-### The report page is a light document inside a dark app
-Anything styled with the app's theme vars (`var(--text)` = `#e8edf5`) renders
-**white-on-white** inside `.report-page`. The customer quotes shipped invisible
-exactly this way. Verify colour with `getComputedStyle`, never a screenshot.
-
-### The service worker caches `app.js` cache-first
-Local changes don't appear until you unregister the SW and clear caches. Bump
-`CACHE` in `sw.js` on every deploy touching `app.js`/`styles.css`. This wasted time
-twice in one session.
-
-### Ad blockers strip elements with generic ids
-`id="login"` was silently hidden — the admin page rendered blank *even in incognito*.
-Avoid `login`, `ad`, `banner`.
-
-### `style.display = ''` reverts to the stylesheet
-If CSS says `display:none`, setting `''` keeps it hidden. Use `'block'`.
-
-### `wrangler pages dev` state can corrupt across concurrent servers
-`_cf_ALARM has 3 columns but 2 values` → the runtime refuses to start. Use
-`--persist-to <isolated dir>` when running a second server.
+- **Google exposes only 5 reviews per business**, and they're the "most relevant" —
+  positivity-skewed, with no sort-by-worst. Mining a 400-review business reads 5 of
+  them. It finds *some* complaints, never all. Say so on every surface.
+- **`wrangler pages dev` state corrupts across concurrent servers.**
+  `_cf_ALARM has 3 columns but 2 values` → the runtime refuses to start. Use
+  `--persist-to <isolated dir>` when running a second server against the same repo.
 
 ---
 
-## 4. Product design principles that earned their keep
+## 4. Design principles — index
 
-- **Every score is explainable.** Each factor emits a finding *and* a sales pitch.
-  Never add an opaque score.
+**Also in `CLAUDE.md`** (§ *Notable design decisions*). The three that were hardest
+won, and the reasoning behind them:
 
-- **There are two review features. Don't conflate them.**
+- **There are two review features. Don't conflate them.** `reviewInsight()` is
+  arithmetic on the public rating and count — a *provable floor*, safe to quote.
+  `mineReviews()` is a model reading the review text — *inference*, and every quote
+  is verified verbatim before it can be shown. We confused these two ourselves at
+  the start of the session; the UI now labels them **estimated** and **AI-read**.
 
-  | | `reviewInsight()` | `mineReviews()` |
-  |---|---|---|
-  | Input | public rating + count | the ≤5 review texts Google exposes |
-  | Method | arithmetic | an LLM reads the text |
-  | Output | "≥12 reviews are below 5★" | "2 people mention overcharging — here's the quote" |
-  | Truth | a **provable floor**, safe to quote | inference; quotes verified verbatim |
-  | Cost | free | Enterprise SKU + an AI call |
+- **Two voices.** Agency copy carries the sales rationale; client copy never does.
+  `clientMining()` strips the agency fields before anything is published. The
+  prospect must never read your sales notes.
 
-  Derived, not fetched: `deficit = (5 − rating) × count` → at least `ceil(deficit/4)`
-  reviews are sub-5-star. Conservative `rating ± 0.05` bounds, so the "at least N"
-  figure is **always safe to say to a prospect**.
+- **Gate on affordability, not tier.** An account that can pay for a thing may do it,
+  whatever it's called. Tier checks calcify as the product grows; budgets don't.
 
-- **Two voices.** Agency copy (`pitch`, `summary`) carries the sales rationale;
-  client copy (`clientPitch`, `clientSummary`) never does. `clientMining()` strips
-  the agency fields before anything is published. *The prospect must never read
-  your sales notes.*
-
-- **The AI is never load-bearing.** No binding, or every model erroring, degrades to
-  a keyword miner and a template reply. The feature gets dumber; it never 500s.
-
-- **Gate on affordability, not tier.** An account that can pay for a thing may do
-  it, whatever it's called. Tier checks calcify; budgets don't.
-
-- **Cache what's expensive, before you charge for it.** Review mining checks KV
-  *before* reserving any budget. A cache hit costs nothing (34ms, measured).
-
-- **Never cache per-account data in a shared entry.** Nearly shipped: the mined-review
-  KV entry carried the miner's credit balance, so the next user would have seen it.
-
-- **The closing paragraph must match what was found.** We told a 95/100 Grade-A
-  listing we'd "resolve the critical issues above" — of which there were none.
-
-- **Failure must not discard what the customer already paid for.** Running out of
-  credits mid-quadtree keeps the leads already fetched.
-
-- **Never auto-send outreach.** One-click *assisted*, never bulk blast. Bulk
-  WhatsApp automation violates their terms and risks bans.
-
-- **Don't scrape Google.** The whole product depends on the Places key.
+Plus: the AI is never load-bearing (it degrades, never 500s) · cache what's expensive
+*before* you charge for it · never cache per-account data in a shared entry · failure
+must not discard what the customer already paid for · never auto-send outreach ·
+don't scrape Google.
 
 ---
+
 
 ## 5. Things I got wrong (Claude), and the lesson
 
@@ -313,4 +259,14 @@ no Review Intelligence section — re-save to populate.
    we already store every lead's rating, review count and rank, so re-scanning on a
    schedule yields the exact asset Local Falcon sells — for the **prospects** an
    agency is chasing, not just the clients they've won. Nobody makes that product.
-7. **SaaS-ify:** Supabase Auth + Stripe. The trial/credit system is the groundwork.
+7. **Landing page rebuild** to Awwwards standard — spec in `PRD-landing.md`.
+8. **SaaS-ify:** Supabase Auth + Stripe. The trial/credit system is the groundwork.
+
+**Deliberately deferred.** Gaps vs LeadsGorilla that look tempting and aren't yet:
+Facebook as a second lead source, built-in email sequences (SMTP), AI copywriting.
+None of them change the economics, and the economics are the constraint.
+
+✅ **Shipped 2026-07-09:** AI review mining + reply drafting (`_lib/reviews.js`) —
+proved the $0 Workers AI approach. Cost metering + BYOK (`_lib/accounts.js`) — made
+a business model possible. The order mattered: mining is the differentiator, BYOK is
+what makes it sellable.
