@@ -57,6 +57,34 @@ rendering the admin page blank *even in incognito*. Admin ids are now prefixed
 If CSS says `#x { display: none }`, setting `el.style.display = ''` keeps it hidden.
 Use `'block'`. (This is why the admin panel stayed blank after a successful login.)
 
+### 7. Asking Places for `reviews` switches to the most expensive SKU
+Adding `reviews` to a field mask moves the call into Google's **Enterprise +
+Atmosphere** tier. **Never put it in `FIELD_MASK` in `places.js`** — that would bill
+the top SKU for every row of a 1,600-lead deep search.
+
+Review text is fetched **on demand, one lead at a time**, via Place Details in
+`_lib/reviews.js`, and cached in KV under `rev:<placeId>` for 30 days. A cache hit
+costs nothing (KV reads are free and are not subrequests).
+
+### 8. Workers AI may return `response` as an **object**, not a string
+`@cf/meta/llama-3.3-70b-instruct-fp8-fast` hands back an already-parsed object;
+`@cf/meta/llama-3.1-8b-instruct-fast` returns a JSON string that can be truncated
+at `max_tokens`. `parseJson()` in `reviews.js` handles both (object passthrough,
+fence stripping, and bracket-repair for truncated output). `String(raw)` on the
+70b response silently yields `"[object Object]"`.
+
+### 9. Google exposes **no owner-reply field** on reviews
+The Places API Review object has no "business responded" property. Never write copy
+claiming a review is *unanswered* or *ignored* — we cannot know, and the pitch dies
+the moment a prospect says "we replied to that one." The AI prompt forbids it
+explicitly; so does the heuristic copy. This was caught in review, after it had
+already been written into the outreach email and the call script.
+
+### 10. A quote read aloud to a prospect **must be verbatim**
+Models paraphrase. `verifyQuotes()` normalizes and checks every quote is a real
+substring of a source review; a quote that fails is **dropped** (the theme survives
+without it). Never relax this — an invented customer quote is unrecoverable.
+
 ---
 
 ## Architecture
@@ -76,6 +104,7 @@ public/
 functions/
   _lib/
     scoring.js    10-factor GMB score + reviewInsight() star-math
+    reviews.js    AI review mining (Workers AI) + reply drafting + heuristic fallback
     places.js     shared Google Places helpers, geocodeCity, quadtree config
     webaudit.js   13-factor website audit (regex heuristics, no DOM)
     pagespeed.js  Google Lighthouse mobile score
@@ -84,6 +113,7 @@ functions/
     demo.js       deterministic fake data (no API key needed)
   api/
     search.js     demo + 'fast' (top-60) + trial caps          [single request]
+    reviews.js    mine review text / draft an owner reply      [full tier, KV-cached]
     plan.js       resolve city → root zones + quadtree config  [~2 Google calls]
     zones.js      search a batch of ≤15 zones                  [≤45 subrequests]
     webaudit.js · pagespeed.js · report.js · auth.js · admin.js
@@ -133,18 +163,25 @@ Sukkur unchanged at 24 leads but **20 → 5** API calls.
 |---|---|
 | `GOOGLE_PLACES_API_KEY` (secret) | Places API (New) + PageSpeed |
 | `ADMIN_PASSWORD` (secret) | admin panel + owner login |
-| `REPORTS` (KV namespace) | hosted reports, view counts, accounts |
+| `REPORTS` (KV namespace) | hosted reports, view counts, accounts, review cache |
+| `AI` (Workers AI binding) | review mining + reply drafting |
 
 Google APIs enabled on the key: **Places API (New)**, **PageSpeed Insights**.
 
 > **TODO:** enable **Geocoding API** and add it to the key's API restrictions.
 > Without it, city resolution silently uses the weaker Places fallback.
+>
+> **TODO:** add the **`AI`** binding in Pages → Settings → Functions → Workers AI,
+> then redeploy. Without it, review mining silently degrades to the keyword miner.
 
 ## Local development
 
 ```bash
-npx wrangler pages dev public --kv REPORTS   # http://localhost:8788
+npx wrangler pages dev public --kv REPORTS --ai AI   # http://localhost:8788
 ```
+`--ai AI` proxies to **real, remote** Workers AI (it costs neurons even locally,
+and needs `wrangler login`). Without the flag, `env.AI` is undefined and you exercise
+the heuristic fallback path — which is worth doing deliberately now and then.
 Secrets come from `.dev.vars` (gitignored):
 ```
 ADMIN_PASSWORD=admin123
@@ -166,9 +203,30 @@ counts, don't rely on local tests to catch them.
   Uses conservative `rating ± 0.05` bounds (Google rounds to 1 decimal), so the
   "at least N" figure is **always safe to quote to a prospect**. Labelled
   *estimated* everywhere, and deliberately **not** a scoring factor.
-- **Two voices.** Agency-facing copy (`headline`/`pitch`) carries the sales
-  rationale; client-facing copy (`clientHeadline`/`clientPitch`) never does.
-  The prospect must never read your sales notes.
+- **There are TWO separate review features. Don't conflate them.**
+
+  | | `reviewInsight()` (scoring.js) | `mineReviews()` (reviews.js) |
+  |---|---|---|
+  | Input | public rating + count | the ≤5 review texts Google exposes |
+  | Method | arithmetic | an LLM reads the text |
+  | Output | "≥12 reviews are below 5★" | "2 people mention overcharging — here's the quote" |
+  | Cost | free | Enterprise SKU + a Workers AI call |
+  | Truth | a provable floor, safe to quote | inference; quotes verified verbatim |
+  | Tier | everyone | full plan only |
+
+  They render side by side in the lead modal as *Review intelligence (estimated)*
+  and *What customers actually say (AI-read)*.
+
+- **The AI is never load-bearing.** If the `AI` binding is missing or every model
+  errors, `mineReviews()` falls back to a keyword miner and `draftReply()` to a
+  template. The feature degrades; it never 500s. `aiDiag` in the response says why.
+
+- **Two voices.** Agency-facing copy (`headline`/`pitch`/`summary`) carries the sales
+  rationale; client-facing copy (`clientHeadline`/`clientPitch`/`clientSummary`)
+  never does. The prospect must never read your sales notes. `clientMining()` in
+  `app.js` strips `pitch` and the agency `summary` before anything is published to a
+  report — that stripping is the only thing standing between your prospect and a
+  line that reads "sell them reputation management."
 - **Combined opportunity** = GMB weakness + a headroom-scaled boost from website
   weakness. Website weakness can only *add* opportunity, never lower an
   already-weak lead.
@@ -188,14 +246,16 @@ counts, don't rely on local tests to catch them.
 - Tokyo deep still leaves ~251 zones truncated (hits the call budget). Exhaustive
   goes deeper at more cost.
 - Google exposes **only 5 reviews per business** — and they're the "most relevant"
-  (positivity-skewed), with no way to sort by worst.
+  (positivity-skewed), with no way to sort by worst. So review mining reads 5 of a
+  400-review business. It finds *some* complaints, never all. Every surface says so.
 - Saved leads live in localStorage unless Supabase is configured (`schema.sql`).
 
 ## Roadmap
 
-1. **AI layer** on free Cloudflare Workers AI + Gemini Flash free tier:
-   review mining (verbatim quotes, testimonials) → then the killer feature,
-   **auto-generating a demo website** for no-website leads.
+1. **AI layer** on free Cloudflare Workers AI + Gemini Flash free tier.
+   ✅ *Review mining + reply drafting shipped* (`_lib/reviews.js`) — this proved the
+   $0 Workers AI approach. Next, the killer feature: **auto-generating a demo
+   website** for no-website leads (Gemini Flash is the better fit for that).
 2. **Landing page rebuild** to Awwwards standard — spec in `PRD-landing.md`.
 3. **SaaS-ify:** Supabase Auth + Stripe. The trial/admin system is the groundwork.
 4. Gaps vs LeadsGorilla worth considering: Facebook as a second source,

@@ -53,6 +53,8 @@ export function renderReportPage(d) {
   .fp{color:#4a5568;font-size:13px;margin-top:2px}
   .speed{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
   .spill{min-width:64px;height:64px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;color:#fff}
+  .quote{border-left:3px solid #f5a623;background:#fffaf0;padding:8px 12px;margin:6px 0 4px;border-radius:0 6px 6px 0;font-style:italic;font-size:13.5px;line-height:1.5}
+  .quote cite{display:block;font-style:normal;font-size:12px;color:#718096;margin-top:5px}
   .cta{background:#fff7e8;border:1px solid #f5a623;border-radius:12px;padding:20px 24px;margin-top:28px}
   .cta h3{margin-bottom:6px}
   .btn{display:inline-block;background:#f5a623;color:#1a1205;font-weight:700;text-decoration:none;padding:11px 20px;border-radius:9px;margin-top:12px}
@@ -116,6 +118,15 @@ export function renderReportPage(d) {
       <div class="finding" style="margin-top:8px"><span class="ic">💰</span><div><div class="ft">${esc(d.reviewInsight.clientPitch || d.reviewInsight.pitch)}</div></div></div>
       ${d.reviewInsight.toTarget ? `<div class="finding"><span class="ic">📈</span><div><div class="ft"><b>${d.reviewInsight.toTarget.needed}</b> new 5-star reviews would lift the average to ${d.reviewInsight.toTarget.target}★.</div></div></div>` : ''}
       <p class="muted" style="font-size:12px;margin-top:8px">Estimated from the public ${esc(String(d.reviewInsight.rating))}★ average across ${d.reviewInsight.count} reviews.</p>
+    </div>` : ''}
+
+    ${d.reviewMining && (d.reviewMining.themes || []).length ? `<div class="section"><h2>🗣️ What your customers are saying</h2>
+      <p style="color:#4a5568;font-size:14px">${esc(d.reviewMining.clientSummary)}</p>
+      <div style="margin-top:8px">${d.reviewMining.themes.map((t) => `<div class="finding"><span class="ic">${t.sentiment === 'praise' ? '💚' : '🔴'}</span><div>
+        <div class="ft"><b>${esc(t.label)}</b></div>
+        ${t.quote ? `<blockquote class="quote">“${esc(t.quote)}”<cite>— ${esc(t.quoteAuthor || 'a customer')}${t.quoteRating ? `, ${t.quoteRating}★` : ''}</cite></blockquote>` : ''}
+      </div></div>`).join('')}</div>
+      <p class="muted" style="font-size:12px;margin-top:8px">Based on the ${d.reviewMining.sampled} review${d.reviewMining.sampled === 1 ? '' : 's'} Google displays publicly${d.reviewMining.totalReviews ? ` of ${d.reviewMining.totalReviews} total` : ''}. Quotes are reproduced verbatim.</p>
     </div>` : ''}
 
     ${d.competitors && d.competitors.marketSize ? `<div class="section"><h2>📊 Competitor Benchmark</h2>

@@ -171,13 +171,24 @@ function buildOutreach(lead) {
       ? `\n\nOne more thing: you've earned a ${ri.rating}★ rating from ${ri.count} customers — and none of that is visible to anyone who doesn't already find you on Google. That's a lot of trust going to waste.`
       : '';
 
+  // Mined-review line. Quoting a customer back at the owner is the single most
+  // persuasive line in the email — and the most dangerous to get wrong, so we
+  // only ever use a quote we verified is verbatim, and we frame it as *theirs*
+  // to fix, never as an accusation.
+  // NB: never assert the review is "unanswered" — Google's API doesn't tell us
+  // whether the owner replied, and being wrong about that torches the pitch.
+  const topComplaint = (lead.reviewMining?.complaints || []).find((t) => t.quote && t.quoteVerified);
+  const miningLine = topComplaint
+    ? `\n\nAlso, reading through your public reviews, "${topComplaint.label.toLowerCase()}" comes up more than once — one customer wrote: "${topComplaint.quote}" That's the kind of thing a prospective customer reads before they ever call you. Responding to reviews like that publicly is quick, free, and changes the impression immediately.`
+    : '';
+
   const email = `Subject: Quick question about ${lead.name}'s Google listing
 
 Hi there,
 
 I was searching for "${lead.keyword}" in ${lead.location} and came across ${lead.name}. I ran a quick audit of your Google Business Profile and noticed a few things that are likely costing you customers:
 
-${bullets}${compLine}${reviewLine}
+${bullets}${compLine}${reviewLine}${miningLine}
 
 These are all fixable — most within a couple of weeks. I put together a free, no-obligation audit report that shows exactly where you stand against competitors nearby.
 
@@ -193,6 +204,10 @@ Opener:
 
 Hook (their top problem):
 "${topIssues[0] ? topIssues[0].text + ' ' + (topIssues[0].pitch || '') : 'Your online presence has some quick wins available.'}"
+${topComplaint ? `
+Their customers' own words (use this — it lands harder than any statistic):
+"I also read through your Google reviews. ${topComplaint.label} came up more than once — one person wrote, '${topComplaint.quote}'. That's what someone comparing you to a competitor reads first."
+` : ''}
 
 Value:
 "We help local businesses fix exactly this — ${services}. Most clients see more calls within 30 days."
@@ -835,6 +850,76 @@ function reviewBlock(l) {
     </div>`;
 }
 
+// -------- AI review mining block (reads the actual review TEXT)
+// Distinct from reviewBlock() above, which is pure arithmetic on rating+count.
+// Costs Google's priciest SKU, so it's on-demand, per-lead, and cached server-side.
+function miningBlock(l) {
+  const m = l.reviewMining;
+  if (!m) {
+    const locked = !feat().deep && !isDemo(); // trials: mining is full-plan only
+    return `
+      <div class="card mb" style="padding:14px 16px">
+        <div class="flex spread">
+          <div>
+            <b>🧠 AI review mining</b>
+            <div class="muted" style="font-size:13px">Read what customers actually wrote — real complaints, in their words, to quote on the call.</div>
+          </div>
+          ${locked
+            ? `<span class="badge badge-muted">🔒 Full plan</span>`
+            : `<button class="btn-sm" id="run-mining">Mine reviews</button>`}
+        </div>
+      </div>`;
+  }
+  if (m.ok === false) {
+    return `<div class="banner banner-warn mb">🧠 Review mining unavailable: ${esc(m.error || 'failed')}</div>`;
+  }
+
+  const themeRow = (t) => {
+    const icon = t.sentiment === 'praise' ? '💚' : '🔴';
+    return `
+      <div class="finding">
+        <span class="icon">${icon}</span>
+        <div style="flex:1">
+          <div><b>${esc(t.label)}</b> <span class="muted" style="font-size:12px">· ${t.count} of ${m.sampled} shown</span></div>
+          ${t.quote && t.quoteVerified
+            ? `<blockquote class="review-quote">“${esc(t.quote)}”
+                 <cite>— ${esc(t.quoteAuthor || 'a customer')}${t.quoteRating ? `, ${t.quoteRating}★` : ''}</cite>
+               </blockquote>`
+            : ''}
+          ${t.pitch ? `<div class="pitch">💰 ${esc(t.pitch)}</div>` : ''}
+        </div>
+      </div>`;
+  };
+
+  const negativeQuotes = (m.quotes || []).filter((q) => (q.rating || 5) <= 3);
+  const sourceNote =
+    m.source === 'demo' ? 'Demo data — enter an access code for live review mining.'
+    : m.source === 'heuristic' ? 'Keyword analysis (the AI model was unavailable) — themes are literal keyword matches.'
+    : `Read by ${esc(m.model || 'AI')}.`;
+
+  return `
+    <h2 style="font-size:15px">🧠 What customers actually say
+      <span class="badge badge-muted" style="font-weight:400">${m.source === 'ai' ? 'AI-read' : m.source === 'demo' ? 'demo' : 'keyword'}</span>
+    </h2>
+    <p class="muted" style="font-size:13px">${esc(m.summary || '')}</p>
+    <div class="mb" style="margin-top:8px">
+      ${(m.themes || []).map(themeRow).join('') || '<div class="finding"><span class="icon">ℹ️</span><div class="muted">No recurring theme found in the reviews Google exposes.</div></div>'}
+    </div>
+    ${negativeQuotes.length ? `
+      <div class="card mb" style="padding:12px 14px">
+        <div class="flex spread" style="gap:10px">
+          <div><b>✍️ Sellable deliverable</b>
+            <div class="muted" style="font-size:13px">Draft the owner's public reply to a negative review — something to hand over on the call.</div>
+          </div>
+          <button class="btn-sm" id="draft-reply">Draft a reply</button>
+        </div>
+      </div>` : ''}
+    <p class="muted" style="font-size:12px;margin-bottom:14px">
+      ⚠️ Based on the <b>${m.sampled}</b> review${m.sampled === 1 ? '' : 's'} Google exposes${m.totalReviews ? ` of ${m.totalReviews} total` : ''} — Google returns only its “most relevant” few, which skew positive. Indicative, not exhaustive. ${sourceNote}
+      ${m.cached ? ' <span title="Served from cache — no API cost">· cached</span>' : ''}
+    </p>`;
+}
+
 function competitorBlock(l) {
   const c = l.competitors;
   if (!c || !c.marketSize) return '';
@@ -883,6 +968,7 @@ async function openLeadModal(lead) {
         </div>
         ${l.website ? webAuditBlock(l) : ''}
         ${reviewBlock(l)}
+        ${miningBlock(l)}
         ${competitorBlock(l)}
         ${isSaved ? `
           <label>Pipeline status <span id="status-fb" class="save-fb"></span></label>
@@ -969,6 +1055,39 @@ async function openLeadModal(lead) {
     };
   }
 
+  const mineBtn = $('#run-mining');
+  if (mineBtn) {
+    mineBtn.onclick = async () => {
+      mineBtn.disabled = true;
+      mineBtn.innerHTML = '<span class="spinner"></span> Reading reviews…';
+      try {
+        const res = await fetch('/api/reviews', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'mine', placeId: l.placeId || l.id, name: l.name, code: accessCode() }),
+        });
+        const mining = await res.json();
+        if (!res.ok) throw new Error(mining.error || 'Mining failed');
+        l.reviewMining = mining;
+        if (isSaved) await store.update(l.id, { reviewMining: mining });
+        if (lastSearch?.results) {
+          const r = lastSearch.results.find((x) => x.placeId === (l.placeId || l.id));
+          if (r) r.reviewMining = mining;
+        }
+        const nComplaints = (mining.complaints || []).length;
+        toast(nComplaints ? `${nComplaints} complaint theme${nComplaints === 1 ? '' : 's'} found` : 'No complaint themes in the visible reviews');
+        openLeadModal(l);
+      } catch (e) {
+        toast('Review mining error: ' + e.message);
+        mineBtn.disabled = false;
+        mineBtn.textContent = 'Mine reviews';
+      }
+    };
+  }
+
+  const replyBtn = $('#draft-reply');
+  if (replyBtn) replyBtn.onclick = () => openReplyModal(l);
+
   if (isSaved) {
     $('#lead-status').onchange = async (e) => {
       l.status = e.target.value;
@@ -1050,6 +1169,96 @@ function openOutreachModal(lead) {
       if (saved && saved.status === 'new') store.update(saved.id, { status: 'contacted' });
     });
   };
+}
+
+// -------- review reply drafting (the deliverable you hand over on the call)
+// The owner posts these publicly, so they are written in the BUSINESS's voice,
+// never the agency's — and always reviewed by a human before posting.
+const REPLY_TONES = [
+  'warm, professional, sincere',
+  'brief and matter-of-fact',
+  'apologetic and accountable',
+];
+
+function openReplyModal(lead, selected = 0, tone = REPLY_TONES[0]) {
+  const quotes = (lead.reviewMining?.quotes || []).filter((q) => (q.rating || 5) <= 3);
+  if (!quotes.length) { toast('No negative reviews to reply to'); return; }
+  const q = quotes[Math.min(selected, quotes.length - 1)];
+
+  $('#modal-root').innerHTML = `
+    <div class="modal-overlay" id="overlay">
+      <div class="modal">
+        <button class="modal-close" id="close">✕</button>
+        <h2>Draft a review reply — ${esc(lead.name)}</h2>
+        <p class="muted mb">Written in the owner's voice, for them to post publicly. Always read it before it goes live.</p>
+
+        ${quotes.length > 1 ? `
+          <label>Which review?</label>
+          <select id="reply-pick">
+            ${quotes.map((x, i) => `<option value="${i}" ${i === selected ? 'selected' : ''}>${x.rating}★ — ${esc(x.text.slice(0, 70))}${x.text.length > 70 ? '…' : ''}</option>`).join('')}
+          </select>` : ''}
+
+        <blockquote class="review-quote" style="margin:14px 0">“${esc(q.text)}”
+          <cite>— ${esc(q.author)}, ${q.rating}★${q.when ? ` · ${esc(q.when)}` : ''}</cite>
+        </blockquote>
+
+        <label>Tone</label>
+        <select id="reply-tone">
+          ${REPLY_TONES.map((t) => `<option value="${esc(t)}" ${t === tone ? 'selected' : ''}>${esc(t)}</option>`).join('')}
+        </select>
+
+        <div class="flex spread mt"><label>Suggested reply</label><button class="btn-ghost btn-sm" id="copy-reply">Copy</button></div>
+        <textarea class="script" id="reply-text" rows="7" placeholder="Generating…"></textarea>
+        <div class="muted" style="font-size:12px;margin-top:4px" id="reply-note"></div>
+
+        <div class="flex mt spread">
+          <button id="regen-reply">↻ Regenerate</button>
+          <button class="btn-ghost" id="close-bottom">✕ Close</button>
+        </div>
+      </div>
+    </div>`;
+
+  const back = () => openLeadModal(lead);
+  $('#close').onclick = back;
+  $('#close-bottom').onclick = back;
+  $('#overlay').onclick = (e) => { if (e.target.id === 'overlay') $('#modal-root').innerHTML = ''; };
+  $('#copy-reply').onclick = () => { navigator.clipboard.writeText($('#reply-text').value); toast('Reply copied'); };
+  if ($('#reply-pick')) $('#reply-pick').onchange = (e) => openReplyModal(lead, Number(e.target.value), $('#reply-tone').value);
+  $('#reply-tone').onchange = (e) => generate(e.target.value);
+  $('#regen-reply').onclick = () => generate($('#reply-tone').value);
+
+  async function generate(t) {
+    const box = $('#reply-text');
+    const note = $('#reply-note');
+    const btn = $('#regen-reply');
+    if (!box) return;
+    box.value = '';
+    box.placeholder = 'Writing…';
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'reply', tone: t, businessName: lead.name,
+          review: { text: q.text, rating: q.rating, author: q.author },
+          code: accessCode(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Draft failed');
+      box.value = data.text;
+      note.textContent = data.source === 'ai'
+        ? `Written by ${data.model}. Edit before posting.`
+        : 'Template draft (the AI model was unavailable). Edit before posting.';
+    } catch (e) {
+      box.placeholder = 'Could not generate a draft.';
+      note.textContent = e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+  generate(tone);
 }
 
 // -------- my leads (pipeline)
@@ -1222,6 +1431,22 @@ async function viewReport(id) {
         <p style="color:#94a3b8;font-size:12px;margin-top:8px">Estimated from the public ${lead.reviewInsight.rating}★ average across ${lead.reviewInsight.count} reviews.</p>
       </div>` : ''}
 
+      ${(() => {
+        const cm = clientMining(lead.reviewMining);
+        if (!cm || !cm.themes.length) return '';
+        const row = (t) => `<div class="report-finding"><span>${t.sentiment === 'praise' ? '💚' : '🔴'}</span><div>
+          <b>${esc(t.label)}</b>
+          ${t.quote ? `<blockquote class="review-quote">“${esc(t.quote)}”<cite>— ${esc(t.quoteAuthor || 'a customer')}${t.quoteRating ? `, ${t.quoteRating}★` : ''}</cite></blockquote>` : ''}
+        </div></div>`;
+        return `
+        <div class="report-section">
+          <h2>🗣️ What your customers are saying</h2>
+          <p style="color:#4a5568;font-size:14px">${esc(cm.clientSummary)}</p>
+          <div style="margin-top:8px">${cm.themes.map(row).join('')}</div>
+          <p style="color:#94a3b8;font-size:12px;margin-top:8px">Based on the ${cm.sampled} review${cm.sampled === 1 ? '' : 's'} Google displays publicly${cm.totalReviews ? ` of ${cm.totalReviews} total` : ''}. Quotes are reproduced verbatim.</p>
+        </div>`;
+      })()}
+
       ${lead.webAudit ? `
       <div class="report-section">
         <h2>🌐 Website audit — Grade ${lead.webAudit.grade} (${lead.webAudit.websiteScore}/100)</h2>
@@ -1267,6 +1492,21 @@ async function viewReport(id) {
   renderSharePanel(lead);
 }
 
+// Two voices: everything the prospect sees is stripped of the agency's rationale.
+function clientMining(m) {
+  if (!m || m.ok === false) return null;
+  return {
+    source: m.source, sampled: m.sampled, totalReviews: m.totalReviews,
+    clientSummary: m.clientSummary || '',
+    themes: (m.themes || []).map((t) => ({
+      label: t.label, sentiment: t.sentiment, count: t.count,
+      quote: t.quoteVerified ? t.quote : null,
+      quoteAuthor: t.quoteAuthor || null, quoteRating: t.quoteRating || null,
+      // `pitch` deliberately omitted — it is written for the agency.
+    })),
+  };
+}
+
 // Snapshot the lead into a compact, self-contained report payload (+ agency branding).
 function buildReportPayload(lead) {
   const s = getSettings();
@@ -1279,6 +1519,9 @@ function buildReportPayload(lead) {
     webAudit: lead.webAudit || null, pageSpeed: lead.pageSpeed || null,
     competitors: lead.competitors || null,
     reviewInsight: lead.reviewInsight || null,
+    // Client-facing snapshot only: strip the agency's pitch/summary and the raw
+    // quote dump. The prospect must never read our sales notes.
+    reviewMining: lead.reviewMining ? clientMining(lead.reviewMining) : null,
     createdAt: new Date().toISOString(),
     agency: { name: s.agencyName || '', tagline: s.agencyTagline || '', email: s.agencyEmail || '', phone: s.agencyPhone || '', website: s.agencyWebsite || '' },
   };
