@@ -64,7 +64,11 @@ export async function onRequestPost(context) {
   let mode;
   let meta = {};
   if (canLive) {
-    const maxPages = resultCap ? 1 : 3;
+    // 'Quick' = a 1-page scout (≤20 results, 1 Google call) for full users too,
+    // not just trials. Cheaper and faster than Fast's 3 pages.
+    const quick = body.quick === true;
+    const cap = resultCap != null ? resultCap : (quick ? 20 : null);
+    const maxPages = (resultCap != null || quick) ? 1 : 3;
     const estimate = maxPages * COST.searchPage;
     const metered = !!(account && !byok); // only our key, on a capped account
 
@@ -77,7 +81,7 @@ export async function onRequestPost(context) {
 
     let calls = estimate;
     try {
-      const res = await googleSearch(keyword, location, ownerKey, maxPages, resultCap);
+      const res = await googleSearch(keyword, location, ownerKey, maxPages, cap);
       businesses = res.places;
       calls = res.calls;
     } catch (err) {

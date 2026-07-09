@@ -470,6 +470,7 @@ async function viewFind() {
       <div style="margin-top:14px;max-width:420px">
         <label>Search depth</label>
         <select id="depth">
+          <option value="quick" ${lastSearch?.depth === 'quick' ? 'selected' : ''}>🏃 Quick — first 20, a fast scout (~2s, cheapest)</option>
           <option value="fast" ${!lastSearch || lastSearch.depth === 'fast' ? 'selected' : ''}>⚡ Fast — top 60 results (~4s)</option>
           <option value="deep" ${lastSearch && (lastSearch.depth === 'deep' || lastSearch.deep) ? 'selected' : ''}>🌆 Deep — full city grid, hundreds of leads (~10s)</option>
           <option value="exhaustive" ${lastSearch?.depth === 'exhaustive' ? 'selected' : ''}>🛰️ Exhaustive — maximum coverage (~15s, more API calls)</option>
@@ -646,10 +647,10 @@ async function runSearch() {
   btn.innerHTML = '<span class="spinner"></span>';
 
   try {
-    if (depth === 'fast') {
+    if (depth === 'fast' || depth === 'quick') {
       const res = await fetch('/api/search', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: spendBody({ keyword, location }),
+        body: spendBody({ keyword, location, quick: depth === 'quick' }),
       });
       const data = await res.json();
       if (res.status === 403 && data.limitReached) return toast('Trial search limit reached — ask for full access to keep searching.');
