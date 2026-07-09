@@ -334,6 +334,26 @@ function waLink(lead, message) {
   return `https://wa.me/${num}?text=${encodeURIComponent(message)}`;
 }
 
+// The email address harvested from the lead's OWN website during the audit.
+// (Compliant — it's the business's public contact address, not scraped from
+// Google.) Empty until a website audit has run.
+function leadEmail(lead) {
+  return (lead.webAudit?.emails || [])[0] || '';
+}
+
+// Turn the cold-email text into a mailto: link. The body starts with a
+// "Subject: …" line — we lift that into the real subject and drop it from the
+// body, so the user's mail client opens correctly pre-filled. Recipient is the
+// harvested email if we have one; otherwise the user fills it in.
+function mailtoLink(lead, emailText) {
+  let body = emailText;
+  let subject = `A quick note about ${lead.name}`;
+  const m = emailText.match(/^Subject:\s*(.+)\n+/);
+  if (m) { subject = m[1].trim(); body = emailText.slice(m[0].length); }
+  const to = encodeURIComponent(leadEmail(lead));
+  return `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
 // ---------------------------------------------------------------- views
 const routes = {
   dashboard: viewDashboard,
@@ -1321,6 +1341,8 @@ function openOutreachModal(lead) {
         ${lead.webAudit?.emails?.length ? `<div class="banner banner-info mt">📧 Send email to: <b>${lead.webAudit.emails.map(esc).join(', ')}</b> <span class="muted">(found on their website)</span></div>` : ''}
         <div class="flex spread mt"><label>Cold email</label><button class="btn-ghost btn-sm" data-copy="email">Copy</button></div>
         <textarea class="script" id="script-email" rows="11">${esc(email)}</textarea>
+        <button class="btn mt" id="email-send" style="width:100%">📧 Open in email${leadEmail(lead) ? ` — to ${esc(leadEmail(lead))}` : ' (add the recipient)'}</button>
+        ${leadEmail(lead) ? '' : `<p class="muted" style="font-size:12px;margin-top:4px">No email found yet — run the website audit on this lead to pull their contact address, or add it in your mail app.</p>`}
         <div class="flex spread mt"><label>Phone script</label><button class="btn-ghost btn-sm" data-copy="call">Copy</button></div>
         <textarea class="script" id="script-call" rows="11">${esc(call)}</textarea>
         <button class="btn-ghost mt" id="close-bottom" style="width:100%">✕ Close</button>
@@ -1335,13 +1357,20 @@ function openOutreachModal(lead) {
       toast('Copied to clipboard');
     };
   });
+  const markContacted = () => store.get(lead.placeId || lead.id).then((saved) => {
+    if (saved && saved.status === 'new') store.update(saved.id, { status: 'contacted' });
+  });
   // send whatever the user edited in the textarea
   $('#wa-send').onclick = () => {
     window.open(waLink(lead, $('#script-wa').value), '_blank');
     toast(num ? 'Opened WhatsApp' : 'Opened WhatsApp — pick the contact');
-    store.get(lead.placeId || lead.id).then((saved) => {
-      if (saved && saved.status === 'new') store.update(saved.id, { status: 'contacted' });
-    });
+    markContacted();
+  };
+  // open the user's mail client pre-filled with the edited email text
+  $('#email-send').onclick = () => {
+    window.location.href = mailtoLink(lead, $('#script-email').value);
+    toast(leadEmail(lead) ? `Opening email to ${leadEmail(lead)}` : 'Opening email — add the recipient');
+    markContacted();
   };
 }
 
