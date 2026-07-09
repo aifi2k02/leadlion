@@ -1855,6 +1855,11 @@ async function viewSettings() {
         🔒 Stored in <b>this browser only</b> — it is sent with each search but never saved on our servers.
         Clearing your browser data removes it.
       </p>
+      <div class="banner banner-info" style="margin-top:10px;font-size:12.5px;line-height:1.6">
+        💡 <b>What it costs you:</b> Google bills you directly — never us.
+        <b>New to Google Cloud?</b> You start with a one-time free trial (currently <b>$300 in credit over 90 days</b>), so your first months cost nothing.
+        After that, Google still includes a <b>free monthly usage allowance</b> that renews each month — the usage counter below resets on the 1st and shows where you stand. Beyond the free tier you pay Google directly, typically only in heavy months.
+      </div>
       <details style="margin-top:10px">
         <summary class="muted" style="cursor:pointer;font-size:13px">How to get a key (5 minutes)</summary>
         <ol class="muted" style="font-size:13px;margin:8px 0 0 18px;line-height:1.7">
@@ -1862,7 +1867,8 @@ async function viewSettings() {
           <li>Enable these three APIs: <b>Places API (New)</b>, <b>Geocoding API</b>, <b>PageSpeed Insights API</b>.</li>
           <li><b>APIs &amp; Services → Credentials → Create credentials → API key.</b></li>
           <li>Click the key, and under <i>“APIs that can be accessed using this key”</i> restrict it to those three. Press <b>OK</b>, then <b>Save</b> at the bottom of the page — the OK button alone does not save.</li>
-          <li>Paste it above. Google gives new accounts free trial credit; after that you pay Google per search.</li>
+          <li>Enable <b>billing</b> on the project (Google requires a card even for the free tier — it is not charged unless you exceed the free allowance). New accounts get the one-time $300 / 90-day trial; every account also gets a free monthly allowance that renews.</li>
+          <li>Paste the key above. That's it — your searches now run on your own account.</li>
         </ol>
         <p class="muted" style="font-size:12.5px;margin-top:8px">Leave <b>Application restrictions</b> on <b>None</b> — searches run from our server, so a website restriction would block every request.</p>
       </details>
