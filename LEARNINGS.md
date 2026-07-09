@@ -46,6 +46,7 @@ you two years ago. One-time pricing on a metered product is a liability you sell
 | **LeadLion** | *find* prospects | bursty | one-time + BYOK |
 | **BrightLocal** | *manage* existing clients | continuous | $31–49 **per location** / mo |
 | **Local Falcon** | *monitor* existing clients | continuous | $24.99–199.99/mo, credit-metered |
+| **Localnord** | *find → manage → retain* (full lifecycle) | continuous | $24 **per listing** / mo ($192/yr) |
 
 Three conclusions:
 
@@ -55,11 +56,44 @@ Three conclusions:
    does not exist.
 2. **Usage pattern determines pricing model.** Prospecting is bursty (nobody
    searches for new leads every day forever), so one-time works. Monitoring is
-   continuous, so it can't. BrightLocal and Local Falcon are *not* our
+   continuous, so it can't. BrightLocal, Local Falcon and Localnord are *not* our
    competitors — they serve clients you've already won.
 3. **Local Falcon defines a credit as a unit of cost**: *"a credit is one data
    point, a 'map pin'… a 5x5 grid scan uses 25 credits."* Unused credits expire
    monthly. That's the model we copied.
+
+### Localnord — the map of where this goes (researched 2026-07-09)
+
+[localnord.io](https://www.localnord.io/en) is the one to study closely, because it
+is **not a competitor — it's our Act 2, already built.** A white-label GBP
+*management* platform: *"prospecting to retention in one tool."* **2,000+ agencies,
+10,000+ listings, 23 countries. $24/listing/mo** ($192/yr). Agencies pay ~$16–24 per
+client and resell at **$99–140/mo**.
+
+Its 21 features are almost all *post-sale*: AI auto-responds to reviews 24/7, collects
+reviews via SMS/email/QR, schedules Google Posts + geotagged photos, real-time rank
+tracking with keyword history, a white-label client dashboard, an AI website builder.
+**Prospecting is one bolt-on feature** — a generic "marketplace of prospects," not a
+sharp instrument.
+
+Two things are true at once, and both matter:
+
+- **We cannot out-Localnord Localnord.** 21 features, 2,000 agencies, years ahead.
+  Building a full GBP-management suite head-on is a multi-year war against a funded
+  incumbent. **Don't.**
+- **Their weakness is exactly our strength.** Their prospecting is a name on a list.
+  Ours finds 1,600 scored, audited leads in a city and hands over the customer's own
+  complaint quote — a *sales weapon*, not a list. On the *finding* phase we beat both
+  them and LeadsGorilla; on everything post-sale, they win and we shouldn't pretend
+  otherwise.
+
+**The strategic payoff: Localnord de-risks our Act 2.** It's the productised,
+2,000-customer proof that the per-listing management subscription — the thing §"The
+decision" says to defer until a customer asks — is real and lucrative. When that
+signal comes, we now know the destination ($24/listing) and the shape. And the bridge
+is one we uniquely own: we already store every lead's rank and reviews, so scheduled
+re-scans give rank tracking **for prospects an agency is chasing** — which even
+Localnord doesn't do (they track clients you've already won).
 
 ### The decision
 
@@ -255,10 +289,11 @@ no Review Intelligence section — re-save to populate.
 5. **Demo-website generator** for no-website leads — *"I already built you a preview,
    want it live?"* The killer feature. Gemini Flash suits it better than Workers AI.
 6. **Monitoring layer** — scheduled scans, rank/review change alerts, trend data.
-   *Only when a customer asks.* This is the subscription, and the bridge is elegant:
-   we already store every lead's rating, review count and rank, so re-scanning on a
-   schedule yields the exact asset Local Falcon sells — for the **prospects** an
-   agency is chasing, not just the clients they've won. Nobody makes that product.
+   *Only when a customer asks.* This is the subscription, de-risked by Localnord
+   ($24/listing, 2,000 agencies — see § "Localnord"). The bridge is elegant: we
+   already store every lead's rating, review count and rank, so re-scanning on a
+   schedule yields the asset Local Falcon and Localnord sell — for the **prospects**
+   an agency is chasing, not just the clients they've won. Nobody makes that product.
 7. **Landing page rebuild** to Awwwards standard — spec in `PRD-landing.md`.
 8. **SaaS-ify:** Supabase Auth + Stripe. The trial/credit system is the groundwork.
 
