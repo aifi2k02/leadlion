@@ -470,8 +470,8 @@ async function viewFind() {
       <div style="margin-top:14px;max-width:420px">
         <label>Search depth</label>
         <select id="depth">
-          <option value="fast" ${lastSearch?.depth === 'fast' ? 'selected' : ''}>⚡ Fast — top 60 results (~4s)</option>
-          <option value="deep" ${!lastSearch || lastSearch.depth === 'deep' || lastSearch.deep ? 'selected' : ''}>🌆 Deep — full city grid, hundreds of leads (~10s)</option>
+          <option value="fast" ${!lastSearch || lastSearch.depth === 'fast' ? 'selected' : ''}>⚡ Fast — top 60 results (~4s)</option>
+          <option value="deep" ${lastSearch && (lastSearch.depth === 'deep' || lastSearch.deep) ? 'selected' : ''}>🌆 Deep — full city grid, hundreds of leads (~10s)</option>
           <option value="exhaustive" ${lastSearch?.depth === 'exhaustive' ? 'selected' : ''}>🛰️ Exhaustive — maximum coverage (~15s, more API calls)</option>
         </select>
         <div class="muted" style="font-size:12px;margin-top:5px">The grid adapts to the city's size — big cities get more zones automatically.</div>
@@ -640,7 +640,7 @@ async function runSearch() {
   const keyword = $('#kw').value.trim();
   const location = $('#loc').value.trim();
   if (!keyword || !location) return toast('Enter both a keyword and a location');
-  const depth = feat().deep ? ($('#depth')?.value || 'deep') : 'fast';
+  const depth = feat().deep ? ($('#depth')?.value || 'fast') : 'fast';
   const btn = $('#go');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span>';
