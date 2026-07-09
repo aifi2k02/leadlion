@@ -1167,6 +1167,7 @@ async function openLeadModal(lead) {
               ? `<a class="btn" href="#/report/${encodeURIComponent(l.id)}">📄 Audit report</a>`
               : `<button id="save-lead">💾 Save lead</button>`}
             <button class="btn-wa" id="wa-quick">💬 WhatsApp</button>
+            <button class="btn-ghost" id="email-quick">📧 Email</button>
             <button class="btn-ghost" id="outreach">✉️ Scripts</button>
           </div>
           <div class="flex">
@@ -1309,6 +1310,21 @@ async function openLeadModal(lead) {
     if (!isSaved) store.save(l); // saving is cheap; keeps a record of who you contacted
     openWhatsApp(l);
   };
+  $('#email-quick').onclick = () => {
+    if (!isSaved) store.save(l);
+    openEmail(l);
+  };
+}
+
+// Open the user's mail client pre-filled with the cold email. Marks 'contacted'.
+function openEmail(lead) {
+  const { email } = buildOutreach(lead);
+  const to = leadEmail(lead);
+  window.location.href = mailtoLink(lead, email);
+  toast(to ? `Opening email to ${to}` : 'Opening email — add the recipient (run the website audit to find it)');
+  store.get(lead.placeId || lead.id).then((saved) => {
+    if (saved && saved.status === 'new') store.update(saved.id, { status: 'contacted' });
+  });
 }
 
 // Open WhatsApp with the pre-filled message. Marks the lead 'contacted'.
