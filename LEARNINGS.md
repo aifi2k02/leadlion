@@ -156,6 +156,39 @@ Tokyo exhaustive is ~1,200 Google calls.
 **Cost weights in `_lib/accounts.js` (`COST`) are approximations.** `reviewMine: 10`
 is a guess at the Enterprise-SKU ratio. Verify before pricing on it.
 
+### What happens when the $300 trial ends
+
+Two clocks — whichever hits first: the **$300 credit**, or **90 days**. At current
+spend (~$107 in the first day) the **90 days** run out well before the money does.
+
+When the trial ends, **Google does not auto-charge the card.** The APIs simply stop
+returning data until you actively click **Upgrade** and convert to a paid account.
+Google forces that as a deliberate choice — it will not silently start billing.
+
+So on the day the trial ends, if you haven't upgraded:
+
+- **Searches stop.** `/api/search`, `/api/plan`, `/api/zones` all call Places → they
+  return errors, not results. Review *mining* stops too (Places Details).
+- **The app keeps running.** Cloudflare Pages is free and separate. Saved leads,
+  reports, the UI, and the Workers-AI layer (reply drafting) all still work — you
+  just can't pull *new* Google data.
+
+Three ways forward:
+
+1. **Upgrade the Google account** → APIs resume, you pay per call ($50–200/mo at
+   volume). This is *you* eating the cost — the exact trap § 1 exists to avoid.
+2. **BYOK is also the owner's own escape hatch.** A different Google account = a
+   fresh $300 / 90 days. Paste that key into Settings and keep going. And every
+   *customer* on their own key never touches your quota at all — their app keeps
+   working because they fund it. This is why one-time + BYOK isn't just the pricing
+   model; it's why *your* trial expiring doesn't take the product down.
+3. **Workers AI is unaffected** — separate Cloudflare allocation. Reply drafting and
+   the AI layer keep working; only Google-backed features stop.
+
+**Do before it bites:** set a **budget alert** (Billing → Budgets & alerts) at, say,
+$250 spent. It doesn't stop anything — it removes the surprise of finding searches
+broken one morning.
+
 ---
 
 ## 3. Technical facts — index
