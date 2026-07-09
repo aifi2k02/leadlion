@@ -251,8 +251,9 @@ Google APIs enabled on the key: **Places API (New)**, **PageSpeed Insights**.
 > **TODO:** enable **Geocoding API** and add it to the key's API restrictions.
 > Without it, city resolution silently uses the weaker Places fallback.
 >
-> **TODO:** add the **`AI`** binding in Pages → Settings → Functions → Workers AI,
-> then redeploy. Without it, review mining silently degrades to the keyword miner.
+> The **`AI`** binding is added and verified live (2026-07-09) — production mining
+> reads real reviews with the 70b model. If it were ever removed, mining silently
+> degrades to the keyword miner (badge flips `AI-read` → `keyword`).
 
 ## Local development
 

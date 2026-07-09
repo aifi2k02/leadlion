@@ -262,9 +262,13 @@ each case the **structural reasoning survived** and the **specific claim didn't.
 | "Trials can run an exhaustive Tokyo search — most urgent thing here" | `newTrial()` hardcodes `deep:false`; `/api/plan` and `/api/zones` 403 without it. A trial was 3 fast searches ≈ **9 calls**. Said twice before checking. | `grep`, 30 seconds. |
 | "LeadsGorilla uses a credit system" | They use **BYOK**, and their "$47 one-time" **renews annually**. | Web search, after the user pushed back. |
 | "$19/mo is the real business" | Invented. No cost data, no comps, no willingness-to-pay. (Local Falcon's floor is $24.99, credit-metered.) | User asked "is that the best model?" |
+| "The production `AI` binding isn't added yet" (said repeatedly) | It **was** added and working — badge `AI-read`, 70b model reading live reviews. Claude confirmed the *local* `--ai` flag and assumed the *production* binding didn't exist without ever checking the dashboard or the badge. | User: "I remember doing it" → screenshot. |
 
-**Lesson: verify specifics.** When a number or a competitor fact is handed to you,
-check it before you build on it. The reasoning is worth more than the recall.
+**Lesson: verify specifics — including your own negative claims.** The AI-binding
+one is the sharpest: a *"this isn't done yet"* is just as much an unverified assertion
+as a *"this is $19."* Both were stated as fact; both were wrong. When you don't know,
+say "I haven't checked" and give the user the 10-second test — don't narrate an
+assumption as status.
 
 Corollary, the one that nearly shipped: the *"still sitting there unanswered"* line
 was already in the outreach email and the call script. It sounded persuasive. It was
@@ -347,12 +351,12 @@ Ordered by *what breaks if you skip it*, not by what's fun. Tick these off here.
 
 ### 🔴 Blockers — do before charging anyone money
 
-- [ ] **Add the `AI` binding in Cloudflare.**
-      Pages → Settings → **Bindings** → Add → **Workers AI** → variable name exactly
-      `AI` → Save → **Retry deployment** (bindings don't apply retroactively).
-      Until then review mining silently runs the keyword fallback: no error, just
-      dumber. Verify: the badge on *"What customers actually say"* reads **`AI-read`**,
-      not `keyword`.
+- [x] **`AI` binding in Cloudflare — DONE (verified live 2026-07-09).**
+      Production review mining confirmed reading real reviews: badge shows
+      **`AI-read`**, disclaimer *"Read by @cf/meta/llama-3.3-70b-instruct-fp8-fast"*
+      (Austin plumber, 4 verified themes, verbatim quotes). NB: Claude repeatedly
+      asserted this was *not* done — it was, and never checked. The `--ai AI` local
+      flag and the production dashboard binding are two different things; both exist.
 
 - [ ] **Get the real SKU costs.** Billing → Reports, grouped by SKU.
       Replace the guessed weights in `COST` (`_lib/accounts.js`) — `reviewMine: 10` is
