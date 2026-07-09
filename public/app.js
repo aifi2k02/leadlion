@@ -13,6 +13,78 @@ function saveSettings(patch) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...getSettings(), ...patch }));
 }
 
+// --- Browser-only usage counter -------------------------------------------
+// Lives ENTIRELY in this browser. Never sent to or recorded on our server.
+// For BYOK users this is the whole picture: their searches bill their own
+// Google account, so there is nothing for us to track and nothing to enforce.
+// Call counts here are FACT — the server returns the real number of Google
+// calls each search made. The dollar figure is a labelled ESTIMATE until the
+// real per-SKU prices are pulled from Billing → Reports (LEARNINGS.md §9).
+const USAGE_KEY = 'leadlion_usage';
+
+// ⚠️ PLACEHOLDER RATES — rough order-of-magnitude, USD per Google call.
+// Replace with the real SKU prices from Billing → Reports. The call *counts*
+// are exact; only these multipliers are approximate, and the UI says so.
+const EST_USD = {
+  apiCall: 0.032,  // Places Text Search / Geocoding (per call)
+  mine: 0.020,     // Place Details + reviews (Enterprise + Atmosphere, per call)
+};
+
+function thisMonth() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function getUsage() {
+  let u;
+  try { u = JSON.parse(localStorage.getItem(USAGE_KEY)); } catch { u = null; }
+  if (!u || u.month !== thisMonth()) u = { month: thisMonth(), searches: 0, apiCalls: 0, mines: 0 };
+  return u;
+}
+
+// Record a unit of usage locally. `apiCalls` is the real count from the server.
+function recordUsage({ searches = 0, apiCalls = 0, mines = 0 } = {}) {
+  const u = getUsage();
+  u.searches += searches;
+  u.apiCalls += apiCalls;
+  u.mines += mines;
+  localStorage.setItem(USAGE_KEY, JSON.stringify(u));
+}
+
+function estUsd(u) {
+  return (u.apiCalls * EST_USD.apiCall) + (u.mines * EST_USD.mine);
+}
+
+// Settings card: this month's usage, computed entirely from the browser ledger.
+// Nothing here is fetched from or stored on our server.
+function usageCard() {
+  const u = getUsage();
+  const byok = hasByok();
+  const monthName = new Date().toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const est = estUsd(u);
+  const totalCalls = u.apiCalls + u.mines;
+  return `
+    <div class="card mb">
+      <h2 style="margin-top:0">📊 Your usage — ${esc(monthName)}</h2>
+      <p class="muted" style="font-size:13.5px">
+        ${byok
+          ? 'These searches run on <b>your own</b> Google key and bill your Google account directly.'
+          : 'A running tally of your activity this month.'}
+        Counted <b>in this browser only</b> — LeadLion never records it.
+      </p>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:6px">
+        <div><div class="stat-num">${u.searches}</div><div class="stat-label">searches</div></div>
+        <div><div class="stat-num">${totalCalls}</div><div class="stat-label">Google API calls</div></div>
+        <div><div class="stat-num">~$${est.toFixed(2)}</div><div class="stat-label">est. Google cost</div></div>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:10px">
+        Call counts are exact. The dollar figure is a <b>rough estimate</b> (${u.mines} review-mine call${u.mines === 1 ? '' : 's'} counted at the higher SKU) —
+        check <a href="https://console.cloud.google.com/billing" target="_blank" rel="noopener" style="color:var(--accent)">Google Billing</a> for the exact amount. Resets on the 1st.
+      </p>
+      <button class="btn-ghost btn-sm" id="s-usage-reset" style="margin-top:8px">Reset counter</button>
+    </div>`;
+}
+
 // ---------------------------------------------------------------- session / access
 const SESSION_KEY = 'leadlion_session';
 let SESSION = null;
@@ -570,6 +642,7 @@ async function runSearch() {
         setSession(SESSION); renderSessionFoot();
       }
       attachCompetitorStats(data.results);
+      if (data.mode === 'live') recordUsage({ searches: 1, apiCalls: data.apiCalls || 0 });
       lastSearch = { keyword, location, mode: data.mode, deep: false, depth, results: data.results, filters: {} };
       return renderResults(lastSearch);
     }
@@ -599,6 +672,7 @@ async function runSearch() {
       if (!res.ok) throw new Error(data.error || 'Search failed');
       syncBalances(data);
       attachCompetitorStats(data.results);
+      if (data.mode === 'live') recordUsage({ searches: 1, apiCalls: data.apiCalls || 0 });
       lastSearch = { keyword, location, mode: data.mode, deep: false, depth, cityResolved: false, results: data.results, filters: {} };
       return renderResults(lastSearch);
     }
@@ -609,6 +683,9 @@ async function runSearch() {
 
     attachCompetitorStats(q.results);
     q.results.sort((a, b) => b.opportunityScore - a.opportunityScore);
+    // Zone calls are exact; the ~1 city-geocode call in /api/plan isn't counted
+    // (negligible against a hundreds-of-call deep search).
+    recordUsage({ searches: 1, apiCalls: q.apiCalls || 0 });
     lastSearch = {
       keyword, location, mode: 'live', deep: true, depth,
       cells: q.cells, apiCalls: q.apiCalls, depthReached: q.depthReached,
@@ -1163,6 +1240,8 @@ async function openLeadModal(lead) {
         }
         if (!res.ok) throw new Error(mining.error || 'Mining failed');
         syncBalances(mining);
+        // Only a live, uncached, non-demo mine actually spends a Google call.
+        if (mining.source !== 'demo' && !mining.cached) recordUsage({ mines: 1 });
         l.reviewMining = mining;
         if (isSaved) await store.update(l.id, { reviewMining: mining });
         if (lastSearch?.results) {
@@ -1789,6 +1868,8 @@ async function viewSettings() {
       </details>
     </div>
 
+    ${usageCard()}
+
     <div class="card mb">
       <h2 style="margin-top:0">🗄️ Supabase sync <span class="badge badge-muted">optional</span></h2>
       <p class="muted" style="font-size:13.5px">Leads live in this browser until you connect Supabase (then they sync across devices). Run <code class="inline">schema.sql</code> in your Supabase SQL editor first.</p>
@@ -1828,6 +1909,12 @@ async function viewSettings() {
     const ok = await initSupabase();
     updateStorageBadge(ok);
     toast(ok ? '✅ Supabase connected' : '❌ Could not connect — check URL/key and that schema.sql was run');
+  };
+  const usageReset = $('#s-usage-reset');
+  if (usageReset) usageReset.onclick = () => {
+    localStorage.removeItem(USAGE_KEY);
+    toast('Usage counter reset');
+    viewSettings();
   };
 }
 

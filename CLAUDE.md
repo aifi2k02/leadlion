@@ -210,6 +210,24 @@ goes to zero, and the one-time licence stops being a liability we sell.
 
 A malformed key falls back to the server key **and is metered** (verified).
 
+### Browser-only usage counter
+
+Separate from the server credit ledger. `recordUsage()` in `app.js` keeps a
+month-rolling tally in localStorage (`leadlion_usage`) — searches, Google API calls,
+review mines — and **nothing is sent to or stored on the server**. Shown in Settings
+(`usageCard()`).
+
+The **call counts are exact** — the server returns the real `apiCalls` per search;
+a fast search is 3, a deep search is `q.apiCalls`, a mine is 1 (0 if cached/demo).
+The **dollar figure is a labelled estimate** via `EST_USD` (placeholder rates — see
+the same Billing → Reports TODO). Two different things:
+
+- **Server ledger** (`apiCallsUsed` in KV) — enforces trial/credit *limits*. Can't
+  be client-side: a limit you don't record is one DevTools edit from being bypassed.
+- **Browser counter** (`leadlion_usage`) — *informational*. For a BYOK user there's
+  nothing to enforce (their key, their bill), so their usage is theirs to see and
+  ours never to record.
+
 - Login gate in `app.js` (`renderGate`/`enterApp`/`boot`), session in localStorage.
 - The **`ADMIN_PASSWORD` secret doubles as the owner's login code.**
 - Accounts live in the `REPORTS` KV namespace under `acct:<code>` keys.

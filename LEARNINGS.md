@@ -367,8 +367,17 @@ Ordered by *what breaks if you skip it*, not by what's fun. Tick these off here.
 
 ### 🟠 Cost visibility — you are the biggest spender and the only untracked user
 
-`resolveAccess()` returns `account: null` for the owner, so **no ledger exists for
-you**. You spent ~$107 of the $300 credit and the app told you nothing.
+`resolveAccess()` returns `account: null` for the owner, so **no server ledger exists
+for you**. You spent ~$107 of the $300 credit and the app told you nothing.
+
+- [x] **Browser-only usage counter (shipped 2026-07-09).** `recordUsage()` /
+      `usageCard()` in `app.js`, stored in localStorage (`leadlion_usage`), never sent
+      to the server. Searches + exact Google-call counts + a labelled dollar estimate,
+      shown in Settings. Solves "let customers see consumption without recording it on
+      my server" — correct for BYOK users (their key, nothing to enforce). Note: this
+      is *informational*, not enforcement; the two are different (see § 4, "gate on
+      affordability"). A client-side counter cannot cap a limit — a trial user could
+      reset it — which is why the **server** ledger still exists for metered accounts.
 
 - [ ] **Owner ledger.** `acct:__owner__` in the existing KV: `apiBudget: null` (never
       blocks you) but `apiCallsUsed` accumulating, broken down by endpoint.
