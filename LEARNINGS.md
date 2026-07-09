@@ -289,8 +289,30 @@ customer's own Google account.
 *(The 30-day KV cache on review mining happens to sit inside that window. That was
 for cost, not compliance — but it's the right side of the line.)*
 
-**Workers AI is per-our-account.** 1,000 users mining reviews share one daily
-allocation. Fine at launch. BYOK the Gemini key when it bites.
+**Workers AI is per-our-account — a shared daily neuron pool, not per user.**
+Every user mining reviews draws from the *same* bucket tied to our Cloudflare
+account (free tier ≈ **10,000 Neurons/day — verify current figure**, it's Cloudflare's
+number). So the ceiling scales with *total* mining across all users, not per head.
+Two things blunt it and three levers raise it:
+
+- **Already protecting us — the 30-day KV cache.** A business is mined **once per
+  30 days** regardless of clicks or how many users open it, so neuron spend scales
+  with *unique businesses mined*, not views. This is the biggest lever and it's built.
+- **Graceful degradation.** Out of neurons → drops to the keyword miner, never errors.
+
+- **Measure, don't guess.** We're on the pricey `llama-3.3-70b`. The real
+  mines-per-day ceiling = read neuron usage off the Cloudflare dashboard after ~10
+  real mines, divide. Do this before assuming a limit either way. *(Claude
+  deliberately refused to invent an "N mines/day" figure — measure it.)*
+- **Cheapest lever: flip the default to `llama-3.1-8b`** (already the fallback in
+  `AI_MODELS`). A fraction of the 70b's neurons; offer 70b as opt-in "deep analysis."
+  One-line change — swap the array order.
+- **Real scale lever: BYOK the AI too.** Let each customer bring a free **Gemini**
+  key (Google AI Studio's free tier). Their mining runs on their allocation; our
+  shared pool stops being the bottleneck. Same philosophy as the Google key.
+- **Or just pay.** Beyond free, Workers AI is fractions of a cent per mine. Key
+  distinction: **Google Places is the large, must-BYOK cost; Workers AI is small
+  enough to absorb.** They are not the same problem.
 
 **The ledger is eventually consistent.** Drift bounded by `BATCHES_IN_PARALLEL`,
 errs toward over-charging the customer. Fine at this scale; not at 1,000 paying users.
@@ -437,6 +459,19 @@ admin panel. Landing page: **0 mentions.** Login gate: **0 mentions.**
 
 - [ ] **Supabase leads table.** `schema.sql` is written but never run; leads live in
       localStorage.
+
+### 🟣 AI scale — when mining volume climbs (see § 6 for the full reasoning)
+
+The Workers AI free tier is a **shared daily neuron pool** across all users, not
+per-head. The 30-day cache already blunts it; these are the levers when it bites.
+
+- [ ] **Measure neurons-per-mine.** Run ~10 real mines, read Cloudflare's neuron
+      meter, divide → the real mines-per-day ceiling. Do this before assuming a limit.
+- [ ] **Flip the default model to `llama-3.1-8b`** (already the fallback in
+      `AI_MODELS`) when volume climbs — a fraction of the 70b's neurons. Offer 70b as
+      an opt-in "deep analysis." One-line swap of the array order.
+- [ ] **BYOK the AI** — let customers bring a free Gemini key (Google AI Studio) so
+      mining runs on *their* allocation, not our shared pool. The real scale answer.
 
 ### 🔵 Then the big ones
 
