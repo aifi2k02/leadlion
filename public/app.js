@@ -1167,7 +1167,9 @@ async function openLeadModal(lead) {
               ? `<a class="btn" href="#/report/${encodeURIComponent(l.id)}">📄 Audit report</a>`
               : `<button id="save-lead">💾 Save lead</button>`}
             <button class="btn-wa" id="wa-quick">💬 WhatsApp</button>
-            <button class="btn-ghost" id="email-quick">📧 Email</button>
+            ${(leadEmail(l) || l.website)
+              ? `<button class="btn-ghost" id="email-quick">📧 Email</button>`
+              : `<button class="btn-ghost" id="email-quick" disabled title="No website on this listing, so there's no email to find — reach them by WhatsApp or phone." style="opacity:.45;cursor:not-allowed">📧 Email</button>`}
             <button class="btn-ghost" id="outreach">✉️ Scripts</button>
           </div>
           <div class="flex">
@@ -1358,7 +1360,10 @@ function openOutreachModal(lead) {
         <div class="flex spread mt"><label>Cold email</label><button class="btn-ghost btn-sm" data-copy="email">Copy</button></div>
         <textarea class="script" id="script-email" rows="11">${esc(email)}</textarea>
         <button class="btn mt" id="email-send" style="width:100%">📧 Open in email${leadEmail(lead) ? ` — to ${esc(leadEmail(lead))}` : ' (add the recipient)'}</button>
-        ${leadEmail(lead) ? '' : `<p class="muted" style="font-size:12px;margin-top:4px">No email found yet — run the website audit on this lead to pull their contact address, or add it in your mail app.</p>`}
+        ${leadEmail(lead) ? ''
+          : lead.website
+            ? `<p class="muted" style="font-size:12px;margin-top:4px">No email found yet — run the website audit on this lead to pull their contact address, or add it in your mail app.</p>`
+            : `<p class="muted" style="font-size:12px;margin-top:4px">⚠️ This listing has no website, so there's no email to find. Reach them by WhatsApp or phone — or paste an address you found elsewhere.</p>`}
         <div class="flex spread mt"><label>Phone script</label><button class="btn-ghost btn-sm" data-copy="call">Copy</button></div>
         <textarea class="script" id="script-call" rows="11">${esc(call)}</textarea>
         <button class="btn-ghost mt" id="close-bottom" style="width:100%">✕ Close</button>
