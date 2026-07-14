@@ -154,6 +154,11 @@ export function renderReportPage(d) {
       </div>
     </div>` : ''}
 
+    ${d.demoSiteUrl ? `<div class="section"><h2>🌐 Your new website — ready to preview</h2>
+      <p style="color:#4a5568;font-size:14px">We've already built a preview of a modern website for ${esc(d.name)}. Take a look:</p>
+      <p style="margin-top:8px"><a href="${esc(d.demoSiteUrl)}" style="color:#146682;font-weight:700;word-break:break-all">${esc(d.demoSiteUrl)}</a></p>
+    </div>` : ''}
+
     <div class="cta">
       <h3>Recommended next steps</h3>
       <p style="font-size:14px;color:#4a5568">${cta}</p>

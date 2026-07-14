@@ -1992,6 +1992,14 @@ async function viewReport(id) {
         </div>
       </div>` : ''}
 
+      ${lead.demoSiteId ? `
+      <div class="report-section">
+        <h2>🌐 Your new website — ready to preview</h2>
+        <p style="color:#4a5568;font-size:14px">We've already built a preview of a modern website for ${esc(lead.name)}. Take a look:</p>
+        <p style="margin-top:8px"><a href="${esc(demoSiteUrl(lead))}" style="color:#146682;font-weight:700;word-break:break-all">${esc(demoSiteUrl(lead))}</a></p>
+        <p style="color:#94a3b8;font-size:12px;margin-top:6px">A live preview — click to open it in your browser.</p>
+      </div>` : ''}
+
       <div class="report-cta">
         <h3>Recommended next steps</h3>
         <p style="font-size:14px;color:#4a5568">${esc(ctaCopy(lead, s.agencyName))}</p>
@@ -2056,6 +2064,7 @@ function buildReportPayload(lead) {
     // Client-facing snapshot only: strip the agency's pitch/summary and the raw
     // quote dump. The prospect must never read our sales notes.
     reviewMining: lead.reviewMining ? clientMining(lead.reviewMining) : null,
+    demoSiteUrl: lead.demoSiteId ? demoSiteUrl(lead) : null,
     createdAt: new Date().toISOString(),
     agency: { name: s.agencyName || '', tagline: s.agencyTagline || '', email: s.agencyEmail || '', phone: s.agencyPhone || '', website: s.agencyWebsite || '' },
   };
