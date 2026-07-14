@@ -1288,19 +1288,65 @@ function flagFabricatedQuotes(html, lead) {
   return found.slice(0, 10);
 }
 
+// Real brand icons as inline SVG (Material Symbols has no brand logos, which is
+// why Stitch emits broken names like "face_nod"). currentColor = inherits the
+// link's text colour.
+const SOCIAL_SVG = {
+  facebook: '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M24 12.07C24 5.4 18.63 0 12 0S0 5.4 0 12.07C0 18.1 4.39 23.1 10.13 24v-8.44H7.08v-3.49h3.05V9.41c0-3.02 1.79-4.69 4.53-4.69 1.31 0 2.68.24 2.68.24v2.97h-1.5c-1.49 0-1.96.93-1.96 1.89v2.25h3.32l-.53 3.49h-2.79V24C19.61 23.1 24 18.1 24 12.07z"/></svg>',
+  instagram: '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M12 2.16c3.2 0 3.58.01 4.85.07 1.17.05 1.8.25 2.23.41.56.22.96.48 1.38.9.42.42.68.82.9 1.38.16.43.36 1.06.41 2.23.06 1.27.07 1.65.07 4.85s-.01 3.58-.07 4.85c-.05 1.17-.25 1.8-.41 2.23-.22.56-.48.96-.9 1.38-.42.42-.82.68-1.38.9-.43.16-1.06.36-2.23.41-1.27.06-1.65.07-4.85.07s-3.58-.01-4.85-.07c-1.17-.05-1.8-.25-2.23-.41a3.7 3.7 0 01-1.38-.9c-.42-.42-.68-.82-.9-1.38-.16-.43-.36-1.06-.41-2.23C2.17 15.58 2.16 15.2 2.16 12s.01-3.58.07-4.85c.05-1.17.25-1.8.41-2.23.22-.56.48-.96.9-1.38.42-.42.82-.68 1.38-.9.43-.16 1.06-.36 2.23-.41C8.42 2.17 8.8 2.16 12 2.16M12 0C8.74 0 8.33.01 7.05.07 5.78.13 4.9.33 4.14.63a5.9 5.9 0 00-2.13 1.38A5.9 5.9 0 00.63 4.14C.33 4.9.13 5.78.07 7.05.01 8.33 0 8.74 0 12s.01 3.67.07 4.95c.06 1.27.26 2.15.56 2.91.31.79.72 1.46 1.38 2.13.67.66 1.34 1.07 2.13 1.38.76.3 1.64.5 2.91.56C8.33 23.99 8.74 24 12 24s3.67-.01 4.95-.07c1.27-.06 2.15-.26 2.91-.56a5.9 5.9 0 002.13-1.38 5.9 5.9 0 001.38-2.13c.3-.76.5-1.64.56-2.91.06-1.28.07-1.69.07-4.95s-.01-3.67-.07-4.95c-.06-1.27-.26-2.15-.56-2.91a5.9 5.9 0 00-1.38-2.13A5.9 5.9 0 0019.86.63c-.76-.3-1.64-.5-2.91-.56C15.67.01 15.26 0 12 0zm0 5.84A6.16 6.16 0 1018.16 12 6.16 6.16 0 0012 5.84zm0 10.16A4 4 0 1116 12a4 4 0 01-4 4zm6.41-10.4a1.44 1.44 0 11-1.44-1.44 1.44 1.44 0 011.44 1.44z"/></svg>',
+  whatsapp: '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.07-.15-.67-1.62-.92-2.22-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.8.37-.27.3-1.05 1.02-1.05 2.5 0 1.47 1.08 2.9 1.23 3.1.15.2 2.12 3.24 5.14 4.54.72.31 1.28.5 1.71.64.72.23 1.38.2 1.9.12.58-.09 1.76-.72 2.01-1.42.25-.7.25-1.29.17-1.42-.07-.13-.27-.2-.57-.35zM12.05 21.5a9.5 9.5 0 01-4.84-1.33l-.35-.2-3.6.94.96-3.5-.23-.36a9.5 9.5 0 01-1.45-5.05c0-5.25 4.27-9.52 9.52-9.52 2.54 0 4.93.99 6.73 2.79a9.46 9.46 0 012.79 6.73c0 5.25-4.27 9.52-9.52 9.52zm8.1-17.62A11.44 11.44 0 0012.05.5C5.79.5.7 5.59.7 11.85c0 2.01.53 3.98 1.53 5.71L.6 23.5l6.08-1.59a11.4 11.4 0 005.37 1.37c6.26 0 11.35-5.09 11.35-11.35 0-3.03-1.18-5.88-3.32-8.03z"/></svg>',
+  globe: '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm6.93 6h-2.95a15.65 15.65 0 00-1.38-3.56A8.03 8.03 0 0118.92 8zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14a7.82 7.82 0 010-4h3.38a16.5 16.5 0 000 4H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56A7.99 7.99 0 015.08 16zm2.95-8H5.08a7.99 7.99 0 014.33-3.56A15.65 15.65 0 008.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82A15.4 15.4 0 0112 19.96zM14.34 14H9.66a14.7 14.7 0 010-4h4.68a14.7 14.7 0 010 4zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 01-4.33 3.56zM16.36 14a16.5 16.5 0 000-4h3.38a7.82 7.82 0 010 4h-3.38z"/></svg>',
+};
+
+// Which brand a footer social link is aiming at — from its href first, then its
+// (often broken) icon name. Returns null for non-social links (tel:, mailto:,
+// real content URLs) so they are left untouched.
+function classifySocial(href, iconName) {
+  const h = (href || '').toLowerCase();
+  const ic = (iconName || '').toLowerCase();
+  if (/^(tel:|mailto:)/.test(h)) return null;
+  if (/wa\.me|whatsapp|api\.whatsapp/.test(h)) return 'whatsapp';
+  if (/facebook|fb\.com|fb\.me/.test(h)) return 'facebook';
+  if (/instagram/.test(h)) return 'instagram';
+  if (/twitter|x\.com/.test(h)) return 'globe';
+  if (/linkedin|tiktok|youtube/.test(h)) return 'globe';
+  // Non-social real URL -> leave it alone.
+  if (/^https?:\/\//.test(h)) return null;
+  // href is "#" (placeholder) — infer from the icon name Stitch chose.
+  if (/photo|camera|instagram/.test(ic)) return 'instagram';
+  if (/chat|message|forum|whatsapp|comment/.test(ic)) return 'whatsapp';
+  if (/face|thumb|public|facebook|share|group/.test(ic)) return 'facebook';
+  return null; // unknown icon-only "#" link — don't guess
+}
+
 // Deterministic clean-ups applied to the export before publishing:
-//   - swap Stitch's grey placeholder image for a tasteful gradient
-//   - bump a stale copyright year to the current year (Stitch often writes 2024)
-// (Real Google-hosted images are left as-is.)
+//   - swap Stitch's grey placeholder images for a tasteful gradient (both the
+//     background-image and <img src> forms)
+//   - replace broken/generic social icons with real inline-SVG brand logos
+//   - bump a stale copyright year to the current year
+// (Real, working Google-hosted images are left as-is.)
 function sanitizeStitchHtml(html) {
   const gradient = 'linear-gradient(135deg, #dbeafe 0%, #ede9fe 55%, #d1fae5 100%)';
   const year = new Date().getFullYear();
   return String(html)
     // background-image: url('...stitch-placeholder...') -> gradient
     .replace(/background-image:\s*url\((['"]?)[^)]*stitch-placeholder[^)]*\1\)/gi, `background-image: ${gradient}`)
-    // any leftover <img src="...stitch-placeholder..."> -> hidden
-    .replace(/<img([^>]*?)src=(['"])[^'"]*stitch-placeholder[^'"]*\2/gi, '<img$1style="display:none" data-removed-placeholder src=$2$2')
-    // stale copyright year in the footer -> current year (© or &copy;, e.g. "© 2024")
+    // <img src="...stitch-placeholder..."> -> a gradient-filled div, keeping the
+    // img's sizing classes (w-full h-full object-cover) so it fills its container.
+    .replace(/<img\b[^>]*?stitch-placeholder[^>]*?>/gi, (m) => {
+      const cls = (m.match(/class=(['"])([\s\S]*?)\1/i) || [, , ''])[2];
+      // Explicit width/height so it fills the container even without Tailwind.
+      return `<div class="${cls}" style="width:100%;height:100%;min-height:180px;background:${gradient}"></div>`;
+    })
+    // Footer social links: icon-only <a> whose content is one material-symbols
+    // span -> real brand SVG. classifySocial() leaves tel:/content links alone.
+    .replace(/<a\b([^>]*?)>\s*<span class="material-symbols-outlined"[^>]*>\s*([a-z_]+)\s*<\/span>\s*<\/a>/gi, (m, aAttrs, icon) => {
+      const href = (aAttrs.match(/href=(['"])([\s\S]*?)\1/i) || [, , ''])[2];
+      const brand = classifySocial(href, icon);
+      if (!brand) return m;
+      return `<a${aAttrs} aria-label="${brand}">${SOCIAL_SVG[brand]}</a>`;
+    })
+    // stale copyright year in the footer -> current year
     .replace(/(©|&copy;)(\s*)((?:19|20)\d\d)/gi, (m, sym, sp, y) => (Number(y) < year ? `${sym}${sp}${year}` : m));
 }
 
