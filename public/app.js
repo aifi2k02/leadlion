@@ -1339,10 +1339,15 @@ function sanitizeStitchHtml(html) {
       return `<div class="${cls}" style="width:100%;height:100%;min-height:180px;background:${gradient}"></div>`;
     })
     // Footer social links: icon-only <a> whose content is one material-symbols
-    // span -> real brand SVG. classifySocial() leaves tel:/content links alone.
-    .replace(/<a\b([^>]*?)>\s*<span class="material-symbols-outlined"[^>]*>\s*([a-z_]+)\s*<\/span>\s*<\/a>/gi, (m, aAttrs, icon) => {
+    // span -> real brand SVG. Matches spans with EXTRA classes too (e.g.
+    // "material-symbols-outlined text-primary"), and prefers the span's data-icon
+    // hint over its (often broken) glyph name. classifySocial() leaves
+    // tel:/content links alone.
+    .replace(/<a\b([^>]*?)>\s*<span\b([^>]*?)>\s*([a-z_]+)\s*<\/span>\s*<\/a>/gi, (m, aAttrs, spanAttrs, iconText) => {
+      if (!/material-symbols-outlined/.test(spanAttrs)) return m; // only icon spans
       const href = (aAttrs.match(/href=(['"])([\s\S]*?)\1/i) || [, , ''])[2];
-      const brand = classifySocial(href, icon);
+      const dataIcon = (spanAttrs.match(/data-icon=(['"])([\s\S]*?)\1/i) || [, , ''])[2];
+      const brand = classifySocial(href, dataIcon || iconText);
       if (!brand) return m;
       return `<a${aAttrs} aria-label="${brand}">${SOCIAL_SVG[brand]}</a>`;
     })
