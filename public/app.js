@@ -1366,10 +1366,17 @@ function sanitizeStitchHtml(html, opts = {}) {
   const year = new Date().getFullYear();
 
   let s = String(html);
-  // Stitch can paste several full documents (a desktop screen + a mobile screen).
-  // Publishing them stacked looks broken — keep only the first complete document.
-  const docs = s.split(/<\/html\s*>/i);
-  if (docs.length > 2) s = docs[0] + '</html>';
+  // Stitch often pastes SEVERAL full documents (a mobile screen AND a desktop
+  // screen). Publishing them stacked looks broken. Keep just one — and prefer the
+  // most desktop-responsive document (the one with the most md:/lg:/xl:
+  // breakpoints), since that one also handles mobile. Stitch tends to list the
+  // mobile-only version first, so "keep the first" would pick the wrong one.
+  const docs = s.split(/<\/html\s*>/i).filter((d) => /<html[\s>]/i.test(d));
+  if (docs.length > 1) {
+    const score = (d) => (d.match(/\b(?:sm|md|lg|xl):/g) || []).length;
+    const best = docs.reduce((a, b) => (score(b) > score(a) ? b : a));
+    s = best + '</html>';
+  }
 
   return s
     // MAP DIV: empty <div ... data-alt="...map..." style="background-image:placeholder"></div>
