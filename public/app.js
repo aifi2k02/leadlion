@@ -1238,6 +1238,52 @@ function realReviewList(lead) {
   return out.slice(0, 5);
 }
 
+// Every real review text we have for this lead — used to tell real quotes in the
+// pasted design from ones Stitch invented.
+function allRealReviewTexts(lead) {
+  const set = [];
+  for (const q of (lead.reviewMining?.quotes || [])) if (q.text) set.push(q.text);
+  for (const t of (lead.reviewMining?.themes || [])) if (t.quote) set.push(t.quote);
+  return set;
+}
+const normQ = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+// The verifyQuotes() idea, applied to a whole pasted design: pull every quoted
+// string out of the VISIBLE text and flag any that isn't one of this lead's real
+// reviews — i.e. the ones Stitch fabricated. Deterministic; no AI HTML surgery.
+function flagFabricatedQuotes(html, lead) {
+  let doc;
+  try { doc = new DOMParser().parseFromString(html, 'text/html'); } catch { return []; }
+  doc.querySelectorAll('script, style').forEach((e) => e.remove());
+  const text = doc.body ? doc.body.textContent || '' : '';
+  const real = allRealReviewTexts(lead).map(normQ).filter((r) => r.length > 8);
+  const found = [];
+  const seen = new Set();
+  const re = /["“”'']([^"“”'\n]{20,220})["“”'']/g;
+  let m;
+  while ((m = re.exec(text))) {
+    const raw = m[1].trim();
+    const n = normQ(raw);
+    if (n.length < 20 || seen.has(n)) continue;
+    seen.add(n);
+    const isReal = real.some((r) => r.includes(n) || n.includes(r));
+    if (!isReal) found.push(raw);
+  }
+  return found.slice(0, 10);
+}
+
+// Deterministic clean-ups applied to the export before publishing. Right now:
+// swap Stitch's grey placeholder image for a tasteful gradient so the hero isn't
+// an empty box. (Real Google-hosted images are left as-is.)
+function sanitizeStitchHtml(html) {
+  const gradient = 'linear-gradient(135deg, #dbeafe 0%, #ede9fe 55%, #d1fae5 100%)';
+  return String(html)
+    // background-image: url('...stitch-placeholder...') -> gradient
+    .replace(/background-image:\s*url\((['"]?)[^)]*stitch-placeholder[^)]*\1\)/gi, `background-image: ${gradient}`)
+    // any leftover <img src="...stitch-placeholder..."> -> transparent 1px (hidden)
+    .replace(/<img([^>]*?)src=(['"])[^'"]*stitch-placeholder[^'"]*\2/gi, '<img$1style="display:none" data-removed-placeholder src=$2$2');
+}
+
 function openImportSiteModal(lead) {
   const reviews = realReviewList(lead);
   const publishedId = lead.demoSiteId || null;
@@ -1258,6 +1304,7 @@ function openImportSiteModal(lead) {
 
         <label>Stitch HTML export</label>
         <textarea class="script" id="import-html" rows="7" placeholder="Paste the full HTML from Stitch → Export → Code to Clipboard…"></textarea>
+        <div id="quote-check" class="mt"></div>
 
         <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;font-weight:400;font-size:13px;cursor:pointer">
           <input type="checkbox" id="import-confirm" style="width:auto;margin-top:3px">
@@ -1268,6 +1315,7 @@ function openImportSiteModal(lead) {
           <button class="btn" id="publish-site" disabled>${publishedId ? 'Re-publish' : 'Publish'} preview</button>
           <button class="btn-ghost" id="close-bottom">← Back</button>
         </div>
+        <p class="muted" style="font-size:12px;margin-top:6px">On publish, the grey placeholder images are swapped for a gradient automatically.</p>
         <div id="publish-result" class="mt"></div>
       </div>
     </div>`;
@@ -1278,16 +1326,32 @@ function openImportSiteModal(lead) {
   const confirmBox = $('#import-confirm');
   const btn = $('#publish-site');
   const sync = () => { btn.disabled = !(confirmBox.checked && $('#import-html').value.trim()); };
+  // Live fabrication check: flag quotes in the paste that aren't real reviews.
+  const runCheck = () => {
+    const html = $('#import-html').value;
+    const box = $('#quote-check');
+    if (!html.trim()) { box.innerHTML = ''; return; }
+    const fakes = flagFabricatedQuotes(html, lead);
+    if (!fakes.length) {
+      box.innerHTML = `<div class="banner banner-info" style="font-size:12.5px">✅ No fabricated-looking quotes detected — every quoted line matches a real review (or there are none).</div>`;
+    } else {
+      box.innerHTML = `<div class="banner banner-warn" style="font-size:12.5px">
+        🚩 <b>${fakes.length} quote${fakes.length === 1 ? '' : 's'} not found in this lead's real reviews</b> — likely invented by Stitch. Delete ${fakes.length === 1 ? 'it' : 'them'} from the HTML above:
+        <ul style="margin:6px 0 0 16px">${fakes.map((q) => `<li>“${esc(q.slice(0, 120))}${q.length > 120 ? '…' : ''}”</li>`).join('')}</ul>
+      </div>`;
+    }
+  };
   confirmBox.onchange = sync;
-  $('#import-html').oninput = sync;
+  $('#import-html').oninput = () => { sync(); runCheck(); };
 
   btn.onclick = async () => {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> Publishing…';
     try {
+      const cleaned = sanitizeStitchHtml($('#import-html').value);
       const res = await fetch('/api/site', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: spendBody({ html: $('#import-html').value, name: lead.name, id: publishedId || undefined }),
+        body: spendBody({ html: cleaned, name: lead.name, id: publishedId || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Publish failed');
