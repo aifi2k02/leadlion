@@ -1141,15 +1141,35 @@ function buildStitchPrompt(lead) {
     p.push(`Feature their ${lead.rating}★ rating from ${lead.reviewCount} Google reviews prominently as a trust badge near the top.`);
   }
   p.push(`Sections, in order: (1) a hero with a strong headline and a primary call-to-action button ("Call now" / "Get a free quote"); (2) a services section covering the services a ${category} typically offers; (3) a testimonials strip; (4) service area and opening hours; (5) a contact block with a phone number and a "Book now" button.`);
-  // Pull a real, verified positive review as the testimonial if mining ran.
-  const praise = (lead.reviewMining?.themes || []).find((t) => t.sentiment === 'praise' && t.quote && t.quoteVerified);
-  const posQuote = praise?.quote || (lead.reviewMining?.quotes || []).filter((q) => (q.rating || 0) >= 4)[0]?.text;
-  if (posQuote) p.push(`Use this real customer testimonial verbatim in the testimonials section: "${posQuote}".`);
+
+  // Real testimonials from mining, verbatim. Feeding these in reduces (but does
+  // not eliminate — Stitch is an LLM) how much it fabricates. The import tool is
+  // the guarantee; this is the "give it good input" half.
+  const realQuotes = [];
+  for (const t of (lead.reviewMining?.themes || [])) {
+    if (t.sentiment === 'praise' && t.quote && t.quoteVerified) realQuotes.push(t.quote);
+  }
+  for (const q of (lead.reviewMining?.quotes || [])) {
+    if ((q.rating || 0) >= 4 && q.text && !realQuotes.includes(q.text)) realQuotes.push(q.text);
+  }
+  const quotes = realQuotes.slice(0, 3);
+  if (quotes.length) {
+    p.push(`Use ONLY these real customer testimonials, verbatim, in the testimonials section — do NOT invent, embellish, or add any others:${quotes.map((q) => `\n  • "${q}"`).join('')}`);
+    if (quotes.length < 3) p.push(`Only ${quotes.length} real testimonial${quotes.length === 1 ? ' is' : 's are'} available — show exactly ${quotes.length}, do not pad the section with made-up reviews.`);
+  } else {
+    p.push(`Do NOT invent any customer testimonials. If no real reviews are provided, omit the testimonials section entirely rather than fabricating quotes.`);
+  }
+
   const contact = [];
   if (lead.phone) contact.push(`phone ${lead.phone}`);
-  if (lead.hasHours) contact.push('opening hours');
-  if (city) contact.push(`service area of ${city}`);
-  if (contact.length) p.push(`Contact details to include: ${contact.join(', ')}.`);
+  if (lead.address) contact.push(`real address "${lead.address}"`);
+  else if (city) contact.push(`service area of ${city}`);
+  if (contact.length) p.push(`Contact details to include exactly as given: ${contact.join(', ')}.`);
+  // We only know a listing HAS hours, never the actual times — so forbid inventing them.
+  p.push(lead.hasHours
+    ? `Include an opening-hours block, but do NOT invent specific times — use the label "Hours: call to confirm" as a placeholder for the owner to fill in.`
+    : `Do not show specific opening hours (none are known).`);
+
   p.push(`Style: modern, generous whitespace, a warm professional colour palette, large readable type, subtle rounded cards, and no cluttered stock photography. Prioritise a fast, mobile-first layout.`);
   return p.join(' ');
 }
