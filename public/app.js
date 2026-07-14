@@ -1170,6 +1170,8 @@ function buildStitchPrompt(lead) {
     ? `Include an opening-hours block, but do NOT invent specific times — use the label "Hours: call to confirm" as a placeholder for the owner to fill in.`
     : `Do not show specific opening hours (none are known).`);
 
+  const year = new Date().getFullYear();
+  p.push(`Footer: use the current year ${year} in the copyright line (e.g. "© ${year} ${name}"). For social links, use a WhatsApp link and only standard, widely-recognised platform icons (Facebook, Instagram, WhatsApp) — never invent or use obscure icon names.`);
   p.push(`Style: modern, generous whitespace, a warm professional colour palette, large readable type, subtle rounded cards, and no cluttered stock photography. Prioritise a fast, mobile-first layout.`);
   return p.join(' ');
 }
@@ -1272,16 +1274,20 @@ function flagFabricatedQuotes(html, lead) {
   return found.slice(0, 10);
 }
 
-// Deterministic clean-ups applied to the export before publishing. Right now:
-// swap Stitch's grey placeholder image for a tasteful gradient so the hero isn't
-// an empty box. (Real Google-hosted images are left as-is.)
+// Deterministic clean-ups applied to the export before publishing:
+//   - swap Stitch's grey placeholder image for a tasteful gradient
+//   - bump a stale copyright year to the current year (Stitch often writes 2024)
+// (Real Google-hosted images are left as-is.)
 function sanitizeStitchHtml(html) {
   const gradient = 'linear-gradient(135deg, #dbeafe 0%, #ede9fe 55%, #d1fae5 100%)';
+  const year = new Date().getFullYear();
   return String(html)
     // background-image: url('...stitch-placeholder...') -> gradient
     .replace(/background-image:\s*url\((['"]?)[^)]*stitch-placeholder[^)]*\1\)/gi, `background-image: ${gradient}`)
-    // any leftover <img src="...stitch-placeholder..."> -> transparent 1px (hidden)
-    .replace(/<img([^>]*?)src=(['"])[^'"]*stitch-placeholder[^'"]*\2/gi, '<img$1style="display:none" data-removed-placeholder src=$2$2');
+    // any leftover <img src="...stitch-placeholder..."> -> hidden
+    .replace(/<img([^>]*?)src=(['"])[^'"]*stitch-placeholder[^'"]*\2/gi, '<img$1style="display:none" data-removed-placeholder src=$2$2')
+    // stale copyright year in the footer -> current year (© or &copy;, e.g. "© 2024")
+    .replace(/(©|&copy;)(\s*)((?:19|20)\d\d)/gi, (m, sym, sp, y) => (Number(y) < year ? `${sym}${sp}${year}` : m));
 }
 
 function openImportSiteModal(lead) {
