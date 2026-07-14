@@ -1172,7 +1172,8 @@ function buildStitchPrompt(lead) {
 
   const year = new Date().getFullYear();
   p.push(`Footer: use the current year ${year} in the copyright line (e.g. "© ${year} ${name}"). For social links, use a WhatsApp link and only standard, widely-recognised platform icons (Facebook, Instagram, WhatsApp) — never invent or use obscure icon names.`);
-  p.push(`Style: modern, generous whitespace, a warm professional colour palette, large readable type, subtle rounded cards, and no cluttered stock photography. Prioritise a fast, mobile-first layout.`);
+  p.push(`Style: modern, generous whitespace, a warm professional colour palette, large readable type, subtle rounded cards, and no cluttered stock photography.`);
+  p.push(`Make it fully responsive and polished on BOTH mobile and desktop — this is important. On large screens, constrain the main content to a maximum width of about 1200px, centred, with section background colours running full width but their inner content centred. Use proper multi-column grid layouts on desktop (for example, show testimonials as a 2-3 column grid on desktop, NOT a horizontal-scroll carousel). Nothing should look stretched, cramped, or edge-to-edge at any screen width.`);
   return p.join(' ');
 }
 
@@ -1320,19 +1321,36 @@ function classifySocial(href, iconName) {
 }
 
 // Deterministic clean-ups applied to the export before publishing:
-//   - swap Stitch's grey placeholder images for a tasteful gradient (both the
-//     background-image and <img src> forms)
+//   - turn Stitch's map slot into a REAL live Google Maps embed (keyless, free)
+//   - swap other grey placeholder images for a tasteful gradient
 //   - replace broken/generic social icons with real inline-SVG brand logos
 //   - bump a stale copyright year to the current year
-// (Real, working Google-hosted images are left as-is.)
-function sanitizeStitchHtml(html) {
+// (Real, working Google-hosted content images are left as-is.)
+function sanitizeStitchHtml(html, address) {
   const gradient = 'linear-gradient(135deg, #dbeafe 0%, #ede9fe 55%, #d1fae5 100%)';
   const year = new Date().getFullYear();
   return String(html)
     // background-image: url('...stitch-placeholder...') -> gradient
     .replace(/background-image:\s*url\((['"]?)[^)]*stitch-placeholder[^)]*\1\)/gi, `background-image: ${gradient}`)
-    // <img src="...stitch-placeholder..."> -> a gradient-filled div, keeping the
-    // img's sizing classes (w-full h-full object-cover) so it fills its container.
+    // MAP: Stitch marks its map image slot with data-location. A live Google Maps
+    // <iframe> can't run inside our security sandbox (no allow-same-origin), so we
+    // use a "directions card" instead: the real address + a link that opens Google
+    // Maps in a new tab. Reliable, secure, and actually more useful (directions).
+    // Must run BEFORE the generic placeholder swap. Gradient fallback if no place.
+    .replace(/<img\b[^>]*?\bdata-location=(['"])([\s\S]*?)\1[^>]*?>/gi, (m, q, loc) => {
+      const cls = (m.match(/class=(['"])([\s\S]*?)\1/i) || [, , ''])[2];
+      const place = (address || loc || '').trim();
+      if (!place) return `<div class="${cls}" style="width:100%;height:100%;min-height:200px;background:${gradient}"></div>`;
+      const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place)}`;
+      const safe = place.replace(/[<>&"]/g, '');
+      return `<a href="${url}" target="_blank" rel="noopener" class="${cls}" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-decoration:none;width:100%;height:100%;min-height:220px;padding:20px;text-align:center;background:${gradient};color:#1f3a5c">`
+        + `<span style="font-size:34px">📍</span>`
+        + `<span style="font-weight:700;font-size:15px;line-height:1.4">${safe}</span>`
+        + `<span style="font-size:13px;font-weight:600;text-decoration:underline">Get directions on Google Maps ↗</span>`
+        + `</a>`;
+    })
+    // <img src="...stitch-placeholder..."> (non-map) -> a gradient-filled div,
+    // keeping the img's sizing classes so it fills its container.
     .replace(/<img\b[^>]*?stitch-placeholder[^>]*?>/gi, (m) => {
       const cls = (m.match(/class=(['"])([\s\S]*?)\1/i) || [, , ''])[2];
       // Explicit width/height so it fills the container even without Tailwind.
@@ -1419,7 +1437,7 @@ function openImportSiteModal(lead) {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> Publishing…';
     try {
-      const cleaned = sanitizeStitchHtml($('#import-html').value);
+      const cleaned = sanitizeStitchHtml($('#import-html').value, lead.address);
       const res = await fetch('/api/site', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: spendBody({ html: cleaned, name: lead.name, id: publishedId || undefined }),
