@@ -1199,9 +1199,17 @@ function openStitchPromptModal(lead) {
         <h2>🎨 Stitch prompt — ${esc(lead.name)}</h2>
         <p class="muted mb">Built from this lead's own Google data${lead.reviewMining ? ' and mined reviews' : ''}. Paste it into Google Stitch to generate the design, then bring the export into the Template Studio.</p>
         <div class="flex spread"><label>Design brief</label><button class="btn-ghost btn-sm" id="copy-stitch">Copy</button></div>
-        <textarea class="script" id="stitch-text" rows="12">${esc(prompt)}</textarea>
+        <textarea class="script" id="stitch-text" rows="10">${esc(prompt)}</textarea>
+        <ol class="muted" style="font-size:12.5px;margin:10px 0 0 18px;line-height:1.7">
+          <li>Copy the brief above → open Stitch → paste → generate the design.</li>
+          <li>In Stitch: <b>Export → Code to Clipboard</b>.</li>
+          <li>Come back and click <b>Import the export</b> below to publish it.</li>
+        </ol>
         <div class="flex mt spread">
-          <a class="btn" href="https://stitch.withgoogle.com/" target="_blank" rel="noopener">Open Google Stitch ↗</a>
+          <div class="flex">
+            <a class="btn" href="https://stitch.withgoogle.com/" target="_blank" rel="noopener">Open Google Stitch ↗</a>
+            <button class="btn-wa" id="to-import">Import the export →</button>
+          </div>
           <button class="btn-ghost" id="close-bottom">✕ Close</button>
         </div>
       </div>
@@ -1211,6 +1219,94 @@ function openStitchPromptModal(lead) {
   $('#close-bottom').onclick = back;
   $('#overlay').onclick = (e) => { if (e.target.id === 'overlay') $('#modal-root').innerHTML = ''; };
   $('#copy-stitch').onclick = () => { navigator.clipboard.writeText($('#stitch-text').value); toast('Stitch prompt copied'); };
+  $('#to-import').onclick = () => openImportSiteModal(lead);
+}
+
+// -------- Import & publish the Stitch export as a hosted /site/<id> preview.
+// Stitch is a generative tool — it FABRICATES testimonials, hours, etc. So before
+// publishing to a real business, we surface the lead's REAL reviews and make the
+// user confirm the site uses real content. The AI makes it pretty; the human
+// (with real data in front of them) makes it true.
+function realReviewList(lead) {
+  const out = [];
+  for (const t of (lead.reviewMining?.themes || [])) {
+    if (t.sentiment === 'praise' && t.quote && t.quoteVerified) out.push({ text: t.quote, who: t.quoteAuthor });
+  }
+  for (const q of (lead.reviewMining?.quotes || [])) {
+    if ((q.rating || 0) >= 4 && q.text && !out.some((r) => r.text === q.text)) out.push({ text: q.text, who: q.author });
+  }
+  return out.slice(0, 5);
+}
+
+function openImportSiteModal(lead) {
+  const reviews = realReviewList(lead);
+  const publishedId = lead.demoSiteId || null;
+  $('#modal-root').innerHTML = `
+    <div class="modal-overlay" id="overlay">
+      <div class="modal">
+        <button class="modal-close" id="close">✕</button>
+        <h2>📥 Import & publish — ${esc(lead.name)}</h2>
+        <p class="muted mb">Paste the <b>Code to Clipboard</b> export from Stitch. It publishes to a private, shareable link you can send the prospect.</p>
+
+        <div class="banner banner-warn mb" style="font-size:13px">
+          ⚠️ <b>Stitch invents content.</b> It commonly fabricates testimonials and opening hours. Before you send this to a real business, open the preview and make sure every review and detail is real.
+          ${reviews.length
+            ? `<div style="margin-top:8px">This lead's <b>real</b> reviews (use these, delete any others Stitch invented):</div>
+               <ul style="margin:6px 0 0 16px">${reviews.map((r) => `<li>“${esc(r.text)}”${r.who ? ` — ${esc(r.who)}` : ''}</li>`).join('')}</ul>`
+            : `<div style="margin-top:8px">We have <b>no mined reviews</b> for this lead — the site should have <b>no testimonials at all</b>. Delete any Stitch invented.</div>`}
+        </div>
+
+        <label>Stitch HTML export</label>
+        <textarea class="script" id="import-html" rows="7" placeholder="Paste the full HTML from Stitch → Export → Code to Clipboard…"></textarea>
+
+        <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;font-weight:400;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="import-confirm" style="width:auto;margin-top:3px">
+          <span>I've checked the design and confirm it contains no invented reviews or false details — only this business's real information.</span>
+        </label>
+
+        <div class="flex mt spread">
+          <button class="btn" id="publish-site" disabled>${publishedId ? 'Re-publish' : 'Publish'} preview</button>
+          <button class="btn-ghost" id="close-bottom">← Back</button>
+        </div>
+        <div id="publish-result" class="mt"></div>
+      </div>
+    </div>`;
+  $('#close').onclick = () => openLeadModal(lead);
+  $('#close-bottom').onclick = () => openStitchPromptModal(lead);
+  $('#overlay').onclick = (e) => { if (e.target.id === 'overlay') $('#modal-root').innerHTML = ''; };
+
+  const confirmBox = $('#import-confirm');
+  const btn = $('#publish-site');
+  const sync = () => { btn.disabled = !(confirmBox.checked && $('#import-html').value.trim()); };
+  confirmBox.onchange = sync;
+  $('#import-html').oninput = sync;
+
+  btn.onclick = async () => {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Publishing…';
+    try {
+      const res = await fetch('/api/site', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: spendBody({ html: $('#import-html').value, name: lead.name, id: publishedId || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Publish failed');
+      lead.demoSiteId = data.id;
+      if (await store.get(lead.placeId || lead.id)) await store.update(lead.id, { demoSiteId: data.id });
+      $('#publish-result').innerHTML = `
+        <div class="banner banner-info" style="font-size:13px">
+          ✅ Published. <a href="${esc(data.url)}" target="_blank" style="color:var(--accent)"><b>${esc(data.url)}</b> ↗</a>
+          <div class="flex mt"><button class="btn-sm" id="copy-site-url">Copy link</button> <a class="btn-sm btn-ghost" href="${esc(data.url)}?p=1" target="_blank">Preview</a></div>
+        </div>`;
+      $('#copy-site-url').onclick = () => { navigator.clipboard.writeText(data.url); toast('Preview link copied'); };
+      toast('Demo site published');
+    } catch (e) {
+      $('#publish-result').innerHTML = `<div class="banner banner-warn" style="font-size:13px">${esc(e.message)}</div>`;
+    } finally {
+      btn.innerHTML = (publishedId ? 'Re-publish' : 'Publish') + ' preview';
+      sync();
+    }
+  };
 }
 
 // -------- lead modal

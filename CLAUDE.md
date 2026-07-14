@@ -115,6 +115,22 @@ Models paraphrase. `verifyQuotes()` normalizes and checks every quote is a real
 substring of a source review; a quote that fails is **dropped** (the theme survives
 without it). Never relax this — an invented customer quote is unrecoverable.
 
+### 15. Published demo sites (`/site/<id>`) MUST stay sandboxed
+The demo-site feature stores the agency's **Stitch HTML export** and serves it at
+`/site/<id>`. That HTML is *untrusted* — serving it raw on our origin would let its
+scripts read our app's localStorage (session codes, the BYOK Google key). So
+`functions/site/[id].js` serves it inside an `<iframe sandbox="allow-scripts …">`
+with **NO `allow-same-origin`** — an opaque origin that can't touch our data
+(verified: cross-origin access throws SecurityError). Never add `allow-same-origin`.
+
+### 16. Stitch fabricates — the import step is a truth gate, not a formality
+Google Stitch is generative: it invents testimonials, opening hours, and details
+even when given real data (it padded a 2-review clinic with 3 fake testimonials).
+The `buildStitchPrompt()` enrichment reduces this (feeds real reviews + address,
+forbids invention) but an LLM can't be trusted to obey. `openImportSiteModal()`
+therefore shows the lead's REAL reviews and requires a human confirmation checkbox
+before publishing. Never auto-publish a Stitch export to a real business unchecked.
+
 ---
 
 ## Architecture
