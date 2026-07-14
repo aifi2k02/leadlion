@@ -1172,7 +1172,8 @@ function buildStitchPrompt(lead) {
 
   const year = new Date().getFullYear();
   p.push(`Footer: use the current year ${year} in the copyright line (e.g. "© ${year} ${name}"). For social links, use a WhatsApp link and only standard, widely-recognised platform icons (Facebook, Instagram, WhatsApp) — never invent or use obscure icon names.`);
-  p.push(`Style: modern, generous whitespace, a warm professional colour palette, large readable type, subtle rounded cards, and no cluttered stock photography.`);
+  p.push(`Style: modern, generous whitespace, a warm professional colour palette, large readable type, and subtle rounded cards.`);
+  p.push(`Imagery: include real, high-quality photographic images (not blank placeholders, illustrations, or grey boxes) — a photographic hero image that reflects a ${category} business, and relevant photos where the design calls for them. The site should look like a finished, photographed website, not a wireframe.`);
   p.push(`Make it fully responsive and polished on BOTH mobile and desktop — this is important. On large screens, constrain the main content to a maximum width of about 1200px, centred, with section background colours running full width but their inner content centred. Use proper multi-column grid layouts on desktop (for example, show testimonials as a 2-3 column grid on desktop, NOT a horizontal-scroll carousel). Nothing should look stretched, cramped, or edge-to-edge at any screen width.`);
   return p.join(' ');
 }
