@@ -1126,6 +1126,73 @@ function competitorBlock(l) {
     </div>`;
 }
 
+// -------- Demo-website: build a Google Stitch prompt from the lead's own data.
+// Deterministic (no API cost) — it just assembles what we already know into a
+// ready-to-paste design brief. Most valuable for no-website leads (the pitch is
+// "I already built you a preview"), but available for any lead.
+function buildStitchPrompt(lead) {
+  const name = lead.name || 'this business';
+  const category = (lead.keyword || 'local business').trim();
+  const city = (lead.location || '').trim();
+  const p = [];
+  p.push(`Design a clean, trustworthy, mobile-first single-page marketing website for "${name}", a ${category}${city ? ` in ${city}` : ''}.`);
+  p.push(`Tone: professional, local, and approachable — built to turn a phone visitor into a call.`);
+  if (lead.rating && lead.reviewCount) {
+    p.push(`Feature their ${lead.rating}★ rating from ${lead.reviewCount} Google reviews prominently as a trust badge near the top.`);
+  }
+  p.push(`Sections, in order: (1) a hero with a strong headline and a primary call-to-action button ("Call now" / "Get a free quote"); (2) a services section covering the services a ${category} typically offers; (3) a testimonials strip; (4) service area and opening hours; (5) a contact block with a phone number and a "Book now" button.`);
+  // Pull a real, verified positive review as the testimonial if mining ran.
+  const praise = (lead.reviewMining?.themes || []).find((t) => t.sentiment === 'praise' && t.quote && t.quoteVerified);
+  const posQuote = praise?.quote || (lead.reviewMining?.quotes || []).filter((q) => (q.rating || 0) >= 4)[0]?.text;
+  if (posQuote) p.push(`Use this real customer testimonial verbatim in the testimonials section: "${posQuote}".`);
+  const contact = [];
+  if (lead.phone) contact.push(`phone ${lead.phone}`);
+  if (lead.hasHours) contact.push('opening hours');
+  if (city) contact.push(`service area of ${city}`);
+  if (contact.length) p.push(`Contact details to include: ${contact.join(', ')}.`);
+  p.push(`Style: modern, generous whitespace, a warm professional colour palette, large readable type, subtle rounded cards, and no cluttered stock photography. Prioritise a fast, mobile-first layout.`);
+  return p.join(' ');
+}
+
+function demoSiteBlock(l) {
+  const noSite = !l.website;
+  return `
+    <div class="card mb" style="padding:14px 16px">
+      <div class="flex spread" style="gap:10px">
+        <div>
+          <b>🎨 Demo website${noSite ? ' <span class="badge" style="background:var(--accent);color:#1a1205">best fit</span>' : ''}</b>
+          <div class="muted" style="font-size:13px">${noSite
+            ? "They have no website — the strongest pitch is “I already built you a preview.” Generate a Stitch design brief from their own data."
+            : 'Generate a Google Stitch design brief for a modern replacement site, built from their own data.'}</div>
+        </div>
+        <button class="btn-sm" id="gen-stitch">Generate Stitch prompt</button>
+      </div>
+    </div>`;
+}
+
+function openStitchPromptModal(lead) {
+  const prompt = buildStitchPrompt(lead);
+  $('#modal-root').innerHTML = `
+    <div class="modal-overlay" id="overlay">
+      <div class="modal">
+        <button class="modal-close" id="close">✕</button>
+        <h2>🎨 Stitch prompt — ${esc(lead.name)}</h2>
+        <p class="muted mb">Built from this lead's own Google data${lead.reviewMining ? ' and mined reviews' : ''}. Paste it into Google Stitch to generate the design, then bring the export into the Template Studio.</p>
+        <div class="flex spread"><label>Design brief</label><button class="btn-ghost btn-sm" id="copy-stitch">Copy</button></div>
+        <textarea class="script" id="stitch-text" rows="12">${esc(prompt)}</textarea>
+        <div class="flex mt spread">
+          <a class="btn" href="https://stitch.withgoogle.com/" target="_blank" rel="noopener">Open Google Stitch ↗</a>
+          <button class="btn-ghost" id="close-bottom">✕ Close</button>
+        </div>
+      </div>
+    </div>`;
+  const back = () => openLeadModal(lead);
+  $('#close').onclick = back;
+  $('#close-bottom').onclick = back;
+  $('#overlay').onclick = (e) => { if (e.target.id === 'overlay') $('#modal-root').innerHTML = ''; };
+  $('#copy-stitch').onclick = () => { navigator.clipboard.writeText($('#stitch-text').value); toast('Stitch prompt copied'); };
+}
+
 // -------- lead modal
 async function openLeadModal(lead) {
   const savedLead = await store.get(lead.placeId || lead.id);
@@ -1155,6 +1222,7 @@ async function openLeadModal(lead) {
         ${l.website ? webAuditBlock(l) : ''}
         ${reviewBlock(l)}
         ${miningBlock(l)}
+        ${demoSiteBlock(l)}
         ${competitorBlock(l)}
         ${isSaved ? `
           <label>Pipeline status <span id="status-fb" class="save-fb"></span></label>
@@ -1285,6 +1353,9 @@ async function openLeadModal(lead) {
 
   const replyBtn = $('#draft-reply');
   if (replyBtn) replyBtn.onclick = () => openReplyModal(l);
+
+  const stitchBtn = $('#gen-stitch');
+  if (stitchBtn) stitchBtn.onclick = () => openStitchPromptModal(l);
 
   if (isSaved) {
     $('#lead-status').onchange = async (e) => {
