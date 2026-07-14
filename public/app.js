@@ -1176,19 +1176,33 @@ function buildStitchPrompt(lead) {
   return p.join(' ');
 }
 
+function demoSiteUrl(l) {
+  return l.demoSiteId ? `${location.origin}/site/${l.demoSiteId}` : '';
+}
+
 function demoSiteBlock(l) {
   const noSite = !l.website;
+  const url = demoSiteUrl(l);
   return `
     <div class="card mb" style="padding:14px 16px">
       <div class="flex spread" style="gap:10px">
         <div>
-          <b>🎨 Demo website${noSite ? ' <span class="badge" style="background:var(--accent);color:#1a1205">best fit</span>' : ''}</b>
+          <b>🎨 Demo website${noSite ? ' <span class="badge" style="background:var(--accent);color:#1a1205">best fit</span>' : ''}${url ? ' <span class="badge" style="background:var(--green);color:#04210f">published</span>' : ''}</b>
           <div class="muted" style="font-size:13px">${noSite
             ? "They have no website — the strongest pitch is “I already built you a preview.” Generate a Stitch design brief from their own data."
             : 'Generate a Google Stitch design brief for a modern replacement site, built from their own data.'}</div>
         </div>
-        <button class="btn-sm" id="gen-stitch">Generate Stitch prompt</button>
+        <button class="btn-sm" id="gen-stitch">${url ? 'New prompt' : 'Generate Stitch prompt'}</button>
       </div>
+      ${url ? `
+      <div class="banner banner-info" style="margin-top:12px;font-size:13px">
+        🌐 <b>Live preview:</b> <a href="${esc(url)}" target="_blank" style="color:var(--accent);word-break:break-all">${esc(url)} ↗</a>
+        <div class="flex mt" style="gap:8px">
+          <button class="btn-sm" id="copy-demo-url">Copy link</button>
+          <button class="btn-sm btn-ghost" id="wa-demo-url">💬 Send on WhatsApp</button>
+          <button class="btn-sm btn-ghost" id="update-demo">Update / re-publish</button>
+        </div>
+      </div>` : ''}
     </div>`;
 }
 
@@ -1543,6 +1557,20 @@ async function openLeadModal(lead) {
   const stitchBtn = $('#gen-stitch');
   if (stitchBtn) stitchBtn.onclick = () => openStitchPromptModal(l);
 
+  const demoUrl = demoSiteUrl(l);
+  if (demoUrl) {
+    const copyBtn = $('#copy-demo-url');
+    if (copyBtn) copyBtn.onclick = () => { navigator.clipboard.writeText(demoUrl); toast('Preview link copied'); };
+    const waBtn = $('#wa-demo-url');
+    if (waBtn) waBtn.onclick = () => {
+      const msg = `Hi — I put together a preview website for ${l.name}: ${demoUrl}`;
+      window.open(waLink(l, msg), '_blank');
+      if (!isSaved) store.save(l);
+    };
+    const updBtn = $('#update-demo');
+    if (updBtn) updBtn.onclick = () => openImportSiteModal(l);
+  }
+
   if (isSaved) {
     $('#lead-status').onchange = async (e) => {
       l.status = e.target.value;
@@ -1769,7 +1797,7 @@ async function viewLeads() {
             return `<div class="pipe-col"><h3>${STATUS_LABEL[st]} · ${col.length}</h3>
               ${col.map((l) => `
                 <div class="lead-card" data-id="${esc(l.id)}">
-                  <div class="name">${esc(l.name)}</div>
+                  <div class="name">${esc(l.name)}${l.demoSiteId ? ' <span title="Demo website published">🌐</span>' : ''}</div>
                   <div class="meta"><span>${esc(l.keyword || '')}</span>${scorePill(l.opportunityScore)}</div>
                 </div>`).join('')}
             </div>`;
