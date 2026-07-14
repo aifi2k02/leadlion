@@ -1320,41 +1320,73 @@ function classifySocial(href, iconName) {
   return null; // unknown icon-only "#" link — don't guess
 }
 
+// A "directions card" for a map slot: real address + a Google Maps link. Used
+// because a live Maps iframe can't run inside our security sandbox.
+function mapCardHtml(cls, place, gradient) {
+  if (!place) return `<div class="${cls}" style="width:100%;height:100%;min-height:200px;background:${gradient}"></div>`;
+  const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place)}`;
+  const safe = place.replace(/[<>&"]/g, '');
+  return `<a href="${url}" target="_blank" rel="noopener" class="${cls}" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-decoration:none;width:100%;height:100%;min-height:220px;padding:20px;text-align:center;background:${gradient};color:#1f3a5c">`
+    + `<span style="font-size:34px">📍</span>`
+    + `<span style="font-weight:700;font-size:15px;line-height:1.4">${safe}</span>`
+    + `<span style="font-size:13px;font-weight:600;text-decoration:underline">Get directions on Google Maps ↗</span>`
+    + `</a>`;
+}
+
+// loremflickr keyword list (literal commas — %2C breaks its parsing).
+function flickrKeywords(keyword) {
+  return keyword.trim().split(/\s+/).slice(0, 2).map(encodeURIComponent).join(',');
+}
+// A CSS `background` value that layers a real category stock photo OVER the
+// gradient: if the photo loads it covers the gradient; if it's slow/blocked the
+// gradient shows through — so the slot is never an empty box.
+function photoBackground(keyword, gradient) {
+  if (!keyword) return gradient;
+  const src = `https://loremflickr.com/1200/900/${flickrKeywords(keyword)}`;
+  return `url('${src}') center/cover no-repeat, ${gradient}`;
+}
+function photoDivHtml(cls, keyword, gradient) {
+  return `<div class="${cls}" style="width:100%;height:100%;min-height:180px;background:${photoBackground(keyword, gradient)}"></div>`;
+}
+
+const getCls = (tag) => (tag.match(/class=(['"])([\s\S]*?)\1/i) || [, , ''])[2];
+const isMapSlot = (tag) => /\bdata-location=/i.test(tag) || /data-alt=(['"])[^'"]*\bmap\b[^'"]*\1/i.test(tag);
+
 // Deterministic clean-ups applied to the export before publishing:
-//   - turn Stitch's map slot into a REAL live Google Maps embed (keyless, free)
-//   - swap other grey placeholder images for a tasteful gradient
-//   - replace broken/generic social icons with real inline-SVG brand logos
-//   - bump a stale copyright year to the current year
-// (Real, working Google-hosted content images are left as-is.)
-function sanitizeStitchHtml(html, address) {
+//   - keep only the FIRST document (Stitch sometimes exports desktop+mobile)
+//   - map slots -> a Google Maps directions card
+//   - other placeholder images -> a real category stock photo (or gradient)
+//   - broken/generic social icons -> real inline-SVG brand logos
+//   - stale copyright year -> current year
+// opts: { address, keyword }. Real, working content images are left as-is.
+function sanitizeStitchHtml(html, opts = {}) {
+  const { address = '', keyword = '' } = opts;
   const gradient = 'linear-gradient(135deg, #dbeafe 0%, #ede9fe 55%, #d1fae5 100%)';
   const year = new Date().getFullYear();
-  return String(html)
-    // background-image: url('...stitch-placeholder...') -> gradient
-    .replace(/background-image:\s*url\((['"]?)[^)]*stitch-placeholder[^)]*\1\)/gi, `background-image: ${gradient}`)
-    // MAP: Stitch marks its map image slot with data-location. A live Google Maps
-    // <iframe> can't run inside our security sandbox (no allow-same-origin), so we
-    // use a "directions card" instead: the real address + a link that opens Google
-    // Maps in a new tab. Reliable, secure, and actually more useful (directions).
-    // Must run BEFORE the generic placeholder swap. Gradient fallback if no place.
-    .replace(/<img\b[^>]*?\bdata-location=(['"])([\s\S]*?)\1[^>]*?>/gi, (m, q, loc) => {
-      const cls = (m.match(/class=(['"])([\s\S]*?)\1/i) || [, , ''])[2];
-      const place = (address || loc || '').trim();
-      if (!place) return `<div class="${cls}" style="width:100%;height:100%;min-height:200px;background:${gradient}"></div>`;
-      const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place)}`;
-      const safe = place.replace(/[<>&"]/g, '');
-      return `<a href="${url}" target="_blank" rel="noopener" class="${cls}" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-decoration:none;width:100%;height:100%;min-height:220px;padding:20px;text-align:center;background:${gradient};color:#1f3a5c">`
-        + `<span style="font-size:34px">📍</span>`
-        + `<span style="font-weight:700;font-size:15px;line-height:1.4">${safe}</span>`
-        + `<span style="font-size:13px;font-weight:600;text-decoration:underline">Get directions on Google Maps ↗</span>`
-        + `</a>`;
+
+  let s = String(html);
+  // Stitch can paste several full documents (a desktop screen + a mobile screen).
+  // Publishing them stacked looks broken — keep only the first complete document.
+  const docs = s.split(/<\/html\s*>/i);
+  if (docs.length > 2) s = docs[0] + '</html>';
+
+  return s
+    // MAP DIV: empty <div ... data-alt="...map..." style="background-image:placeholder"></div>
+    .replace(/<div\b([^>]*?)>\s*<\/div>/gi, (m, attrs) => {
+      if (!/stitch-placeholder/.test(attrs) || !isMapSlot(attrs)) return m;
+      return mapCardHtml(getCls(m), address, gradient);
     })
-    // <img src="...stitch-placeholder..."> (non-map) -> a gradient-filled div,
-    // keeping the img's sizing classes so it fills its container.
+    // MAP IMG: <img ... data-location / data-alt="...map..." ... src="...placeholder...">
     .replace(/<img\b[^>]*?stitch-placeholder[^>]*?>/gi, (m) => {
-      const cls = (m.match(/class=(['"])([\s\S]*?)\1/i) || [, , ''])[2];
-      // Explicit width/height so it fills the container even without Tailwind.
-      return `<div class="${cls}" style="width:100%;height:100%;min-height:180px;background:${gradient}"></div>`;
+      if (isMapSlot(m)) return mapCardHtml(getCls(m), address, gradient);
+      return photoDivHtml(getCls(m), keyword, gradient);
+    })
+    // background-image placeholder (non-map hero/decorative divs) -> stock photo
+    // layered over the gradient (never empty). Explicit width/height so it fills
+    // its container even without Tailwind.
+    .replace(/style="([^"]*)background-image:\s*url\((['"]?)[^)]*stitch-placeholder[^)]*\2\)([^"]*)"/gi, (m, pre, q, post) => {
+      const size = '; width:100%; height:100%; min-height:180px';
+      return `style="${pre}background: ${photoBackground(keyword, gradient)}${size}${post}"`;
     })
     // Footer social links: icon-only <a> whose content is one material-symbols
     // span -> real brand SVG. Matches spans with EXTRA classes too (e.g.
@@ -1437,7 +1469,7 @@ function openImportSiteModal(lead) {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> Publishing…';
     try {
-      const cleaned = sanitizeStitchHtml($('#import-html').value, lead.address);
+      const cleaned = sanitizeStitchHtml($('#import-html').value, { address: lead.address, keyword: lead.keyword });
       const res = await fetch('/api/site', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: spendBody({ html: cleaned, name: lead.name, id: publishedId || undefined }),
