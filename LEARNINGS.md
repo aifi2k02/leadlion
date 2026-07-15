@@ -371,6 +371,25 @@ what makes it sellable.
 
 Ordered by *what breaks if you skip it*, not by what's fun. Tick these off here.
 
+### 📌 Session handoff (state as of last session, 2026-07-15)
+
+- **Production is at commit `2a0bfc8`, SW `leadlion-v42`** — everything below the
+  demo-website feature is live and unchanged.
+- **✅ Demo-website feature is COMPLETE and live.** Full pipeline: enrich Stitch
+  prompt (real reviews + address + real-photo request) → import & sanitize (drop
+  extra doc / keep the most desktop-responsive one, real reviews, brand-SVG social
+  icons, map→directions card, placeholders→photo-or-gradient, current year) →
+  publish sandboxed `/site/<id>` → link saved on the lead + in reports. Hardened
+  against **6 real Stitch exports**. See CLAUDE.md §15–16 for the invariants.
+- **⚠️ UNCOMMITTED, UNPUSHED: a UI polish pass.** `public/styles.css` +
+  `public/app.html` have a cosmetic refresh (Inter font, refined dark palette,
+  shadows, focus rings, active-nav accent, modal blur — **cosmetic only, zero logic
+  changed**). It was previewed on localhost and **awaits the user's visual
+  approval**. To resume: `npx wrangler pages dev public --kv REPORTS --ai AI`,
+  hard-refresh, review `/app` (log in `admin123`). If approved → bump SW to v43,
+  commit, push. If not → `git checkout public/styles.css public/app.html` to revert.
+  Production still shows the OLD look until this is pushed.
+
 ### 🔴 Blockers — do before charging anyone money
 
 - [x] **`AI` binding in Cloudflare — DONE (verified live 2026-07-09).**
