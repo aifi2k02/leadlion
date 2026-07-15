@@ -456,10 +456,13 @@ Currently surfaced in five places, all *inside* the app: the Settings card, the
 "using your own key" banner, the trial nudge, three 402 error messages, and the
 admin panel. Landing page: **0 mentions.** Login gate: **0 mentions.**
 
-- [ ] **"Test my key" button** in Settings. Runs a 1-result search and reports
-      success/failure. Today a bad key fails silently at Google **and is metered
-      against your budget** (a malformed key falls back to the server key by design).
-      Smallest item here; prevents a real footgun.
+- [x] **"Test my key" button — DONE (2026-07-15).** `POST /api/testkey` makes one
+      live Places call with the user's key only (never falls back to ours) →
+      working / rejected-by-Google (with reason) / format-not-recognized / empty.
+      Also fixed the silent leak: `hasByok()` now requires the Google-key SHAPE
+      (`looksLikeGoogleKey`), so the "connected" badge + "unlimited" banner only
+      show when the server would actually honour the key. A malformed key no longer
+      reads as connected while quietly billing our budget.
 
 - [ ] **Landing-page BYOK section.** Frame the honesty as the feature:
       *"$47 once. You bring your own Google key — here's exactly what it costs, and a
