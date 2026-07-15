@@ -371,24 +371,33 @@ what makes it sellable.
 
 Ordered by *what breaks if you skip it*, not by what's fun. Tick these off here.
 
-### 📌 Session handoff (state as of last session, 2026-07-15)
+### 📌 Session handoff (state as of 2026-07-15, UI overhaul shipped)
 
-- **Production is at commit `2a0bfc8`, SW `leadlion-v42`** — everything below the
-  demo-website feature is live and unchanged.
+- **Production is at SW `leadlion-v49`** — the UI overhaul below is live and pushed.
 - **✅ Demo-website feature is COMPLETE and live.** Full pipeline: enrich Stitch
   prompt (real reviews + address + real-photo request) → import & sanitize (drop
   extra doc / keep the most desktop-responsive one, real reviews, brand-SVG social
   icons, map→directions card, placeholders→photo-or-gradient, current year) →
   publish sandboxed `/site/<id>` → link saved on the lead + in reports. Hardened
   against **6 real Stitch exports**. See CLAUDE.md §15–16 for the invariants.
-- **⚠️ UNCOMMITTED, UNPUSHED: a UI polish pass.** `public/styles.css` +
-  `public/app.html` have a cosmetic refresh (Inter font, refined dark palette,
-  shadows, focus rings, active-nav accent, modal blur — **cosmetic only, zero logic
-  changed**). It was previewed on localhost and **awaits the user's visual
-  approval**. To resume: `npx wrangler pages dev public --kv REPORTS --ai AI`,
-  hard-refresh, review `/app` (log in `admin123`). If approved → bump SW to v43,
-  commit, push. If not → `git checkout public/styles.css public/app.html` to revert.
-  Production still shows the OLD look until this is pushed.
+- **✅ UI overhaul SHIPPED (2026-07-15).** All approved on localhost, then pushed:
+  - **Visual refresh** — Inter font, refined dark palette, focus rings, gradient
+    buttons, gold **active-nav pill**, gold stat numbers, cards with accent top-line.
+  - **Emoji → inline SVG icons, app-wide.** `ICONS`/`ic()`/`sevIcon()` in `app.js`
+    and `RICONS`/`rico()`/`sevRico()` in `reportPage.js` (server report). Icons
+    inherit `currentColor`; severity colours (red/amber/green/blue) are exact — the
+    mapping drives what a prospect reads, so keep it. Typographic glyphs kept: ✕ ✓ ★
+    → ← ↗ ↻ ☰. To re-add an icon, add a path to `ICONS` and call `ic('name')`.
+  - **Search-depth = custom dropdown** (not a native `<select>` — can't show coloured
+    dots or two-line options). Tiers: Quick(green)/Standard(blue)/Deep(orange)/Full
+    sweep(red); colour = cost/coverage axis (also the packaging/upsell axis). Value
+    lives in hidden `#depth`, read by `runSearch`. Wired in `wireDepthPicker()`.
+  - **Gotcha logged:** `.card` had `overflow:hidden` (to clip the accent top-line),
+    which clipped the dropdown menu. Fixed by rounding `.card::before` instead.
+  - **Fixes:** model-slug leak removed (mining note + reply drafter now say "AI",
+    not `@cf/meta/llama-…`); `Prepared <date>` in the in-app report uses `lead.savedAt`
+    (was always today); **Audit-all capped at 50** (top-by-opportunity, confirm above
+    50); competitor "behind" values rounded (`0.2999…` → `0.3`).
 
 ### 🔴 Blockers — do before charging anyone money
 
@@ -471,10 +480,13 @@ admin panel. Landing page: **0 mentions.** Login gate: **0 mentions.**
       address. Group by address; collapse into the parent or badge *"same address as
       N other leads"*. See § 7.
 
-- [ ] **Cap "Audit all websites"** on huge result sets. Tokyo deep returns 6,137 rows.
+- [x] **Cap "Audit all websites"** on huge result sets — DONE (2026-07-15). Capped at
+      `AUDIT_CAP = 50`, audits the top 50 by opportunity, confirm dialog above 50, and
+      the button reads "Audit top 50 websites". `auditAllWebsites()` in `app.js`.
 
-- [ ] **Fix `Prepared <date>`** — it renders `new Date()` at view time, so an old lead
-      looks freshly prepared. Store `preparedAt` on save.
+- [x] **Fix `Prepared <date>`** — DONE (2026-07-15). Renders `lead.savedAt` (no new
+      field needed — leads already store `savedAt` on save). Only the in-app report
+      was wrong; the hosted report already used `createdAt`.
 
 - [ ] **Supabase leads table.** `schema.sql` is written but never run; leads live in
       localStorage.

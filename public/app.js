@@ -22,7 +22,7 @@ function saveSettings(patch) {
 // real per-SKU prices are pulled from Billing → Reports (LEARNINGS.md §9).
 const USAGE_KEY = 'leadlion_usage';
 
-// ⚠️ PLACEHOLDER RATES — rough order-of-magnitude, USD per Google call.
+// PLACEHOLDER RATES — rough order-of-magnitude, USD per Google call.
 // Replace with the real SKU prices from Billing → Reports. The call *counts*
 // are exact; only these multipliers are approximate, and the UI says so.
 const EST_USD = {
@@ -65,7 +65,7 @@ function usageCard() {
   const totalCalls = u.apiCalls + u.mines;
   return `
     <div class="card mb">
-      <h2 style="margin-top:0">📊 Your usage — ${esc(monthName)}</h2>
+      <h2 style="margin-top:0">${ic('barChart')} Your usage — ${esc(monthName)}</h2>
       <p class="muted" style="font-size:13.5px">
         ${byok
           ? 'These searches run on <b>your own</b> Google key and bill your Google account directly.'
@@ -204,6 +204,70 @@ const store = {
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// Inline icon set (Lucide-style stroke paths). Icons inherit `currentColor`, so a
+// glyph takes the colour of its context — dim in a nav link, dark inside the gold
+// active pill, red/green when carrying a severity class. Emoji can't do that and
+// render differently on every OS, so the whole app uses these instead.
+const ICONS = {
+  search: '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+  phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z"/>',
+  chat: '<path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18Z"/>',
+  save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
+  trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  printer: '<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>',
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
+  flame: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.4-.5-2-1-3-1-1.6-.5-3.4 1-5 .5 2.5 2 4.4 4 6 1.5 1.2 2 2.5 2 4a6 6 0 1 1-12 0c0-1.3.5-2.5 1-3.5.3 1 .8 1.7 1.5 2Z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/>',
+  snow: '<line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><path d="m20 16-4-4 4-4M4 8l4 4-4 4M16 4l-4 4-4-4M8 20l4-4 4 4"/>',
+  zap: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+  sparkles: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
+  lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  key: '<path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 1 0-1.4 1.4L13 16l2 2 2-2 2 2 2-2-6.6-6.6Z"/><circle cx="7.5" cy="15.5" r="1.5"/>',
+  palette: '<circle cx="12" cy="12" r="9"/><circle cx="8" cy="9" r="1"/><circle cx="12" cy="7" r="1"/><circle cx="16" cy="9" r="1"/><path d="M12 21a3 3 0 0 1 0-6h1a2 2 0 0 0 2-2 4 4 0 0 0-4-4"/>',
+  pin: '<path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0 1 18 0Z"/><circle cx="12" cy="10" r="3"/>',
+  trendUp: '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>',
+  trendDown: '<polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/>',
+  barChart: '<line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/>',
+  heart: '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8Z"/>',
+  trophy: '<path d="M6 9a6 6 0 0 0 12 0V3H6Z"/><path d="M6 5H4a2 2 0 0 0 0 4h2M18 5h2a2 2 0 0 1 0 4h-2M8 21h8M12 15v6"/>',
+  star: '<polygon points="12 2 15.1 8.3 22 9.3 17 14.1 18.2 21 12 17.8 5.8 21 7 14.1 2 9.3 8.9 8.3 12 2"/>',
+  flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1Z"/><line x1="4" y1="22" x2="4" y2="15"/>',
+  megaphone: '<path d="m3 11 18-5v12L3 14v-3Z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
+  pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+  building: '<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4M8 6h.01M12 6h.01M16 6h.01M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01"/>',
+  database: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
+  bulb: '<path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1h6c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2Z"/>',
+  signal: '<path d="M5 12.5a7 7 0 0 1 14 0M8.5 15.5a3.5 3.5 0 0 1 7 0"/><circle cx="12" cy="19" r="1"/>',
+  ticket: '<path d="M3 9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2 2 2 0 0 0 0 6 2 2 0 0 1-2 2H5a2 2 0 0 1-2-2 2 2 0 0 0 0-6Z"/><line x1="13" y1="7" x2="13" y2="17"/>',
+  sprout: '<path d="M12 20v-8M12 12C12 8 9 6 4 6c0 4 3 6 8 6ZM12 12c0-3 2-5 6-5 0 3-2 5-6 5Z"/>',
+  users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
+  inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1Z"/>',
+  dollar: '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+  alertCircle: '<circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="12.5"/><path d="M12 16h.01"/>',
+  alertTriangle: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><line x1="12" y1="9" x2="12" y2="13"/><path d="M12 17h.01"/>',
+  checkCircle: '<path d="M22 11.1V12a10 10 0 1 1-5.9-9.1"/><polyline points="22 4 12 14 9 11"/>',
+  info: '<circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><path d="M12 8h.01"/>',
+  x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  beaker: '<path d="M9 3h6M10 3v6.6L4.2 18a2 2 0 0 0 1.8 3h12a2 2 0 0 0 1.8-3L14 9.6V3"/><line x1="7" y1="14" x2="17" y2="14"/>',
+  chevron: '<polyline points="6 9 12 15 18 9"/>',
+};
+function ic(name, cls = '') {
+  return `<svg class="ic${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+}
+// Severity → coloured status icon. Keep this mapping exact: it drives what a
+// prospect reads (red = critical problem = the sales hook). 'ok' passes are green.
+function sevIcon(sev) {
+  if (sev === 'ok' || sev === true) return ic('checkCircle', 'ic-ok');
+  if (sev === 'critical') return ic('alertCircle', 'ic-critical');
+  if (sev === 'warning') return ic('alertTriangle', 'ic-warning');
+  return ic('info', 'ic-info');
+}
+
 function toast(msg) {
   const el = document.createElement('div');
   el.className = 'toast';
@@ -223,7 +287,7 @@ function gradeBadge(grade) {
 }
 
 const STATUSES = ['new', 'contacted', 'meeting', 'won', 'lost'];
-const STATUS_LABEL = { new: '🆕 New', contacted: '📞 Contacted', meeting: '🤝 Meeting', won: '✅ Won', lost: '❌ Lost' };
+const STATUS_LABEL = { new: 'New', contacted: 'Contacted', meeting: 'Meeting', won: 'Won', lost: 'Lost' };
 
 // ---------------------------------------------------------------- outreach
 function allIssues(lead) {
@@ -397,7 +461,7 @@ function opportunityChart(leads) {
   const max = Math.max(1, hot, warm, cold);
   const bar = (label, n, color) => `<div class="funnel-row"><span class="fl">${label}</span><div class="funnel-bar" style="width:${(n / max) * 100}%;background:${color}">${n || ''}</div></div>`;
   return `<div class="chart-card"><h3>Opportunity spread</h3>
-    ${bar('🔥 Hot', hot, '#f87171')}${bar('☀️ Warm', warm, '#fbbf24')}${bar('❄️ Cold', cold, '#34d399')}
+    ${bar('Hot', hot, '#f87171')}${bar('Warm', warm, '#fbbf24')}${bar('Cold', cold, '#34d399')}
   </div>`;
 }
 
@@ -438,7 +502,7 @@ async function viewDashboard() {
       <div class="card">
         <h2 style="margin-top:0">Get your first leads in 30 seconds</h2>
         <p class="muted mb">Search any niche + city. LeadLion scores every business by how badly they need your help — then generates the audit report and outreach script to close them.</p>
-        <a class="btn" href="#/find">🔍 Find leads now</a>
+        <a class="btn" href="#/find">${ic('search')} Find leads now</a>
       </div>` : `
       <div class="grid mb" style="grid-template-columns:repeat(auto-fit,minmax(250px,1fr))">
         ${funnelChart(leads)}
@@ -456,6 +520,40 @@ async function viewDashboard() {
 // -------- find leads
 async function viewFind() {
   const p = SESSION?.profile || {};
+  // Search-depth tiers as selectable cards. Colours escalate with cost/coverage
+  // (green → blue → orange → red) so the spend axis reads at a glance — this is
+  // also the packaging/upsell axis. Native <option> can't show colour or two
+  // lines, so this replaces the old <select>. Value is read from the checked
+  // radio at search time (see runSearch).
+  const curDepth = !lastSearch ? 'quick' : (lastSearch.depth || (lastSearch.deep ? 'deep' : 'quick'));
+  const TIERS = [
+    ['quick', 'var(--green)', 'Quick scout', '≈20 top leads in seconds. Cheapest way to test a niche.'],
+    ['fast', 'var(--blue)', 'Standard search', 'The 60 best-matching leads in the area. ~4s.'],
+    ['deep', '#fb923c', 'Deep dive', 'Every neighbourhood, block by block — hundreds of leads. ~10s.'],
+    ['exhaustive', 'var(--red)', 'Full sweep', 'Every lead we can possibly find. ~15s, most API calls.'],
+  ];
+  const cur = TIERS.find((t) => t[0] === curDepth) || TIERS[0];
+  const depthPicker = feat().deep ? `
+      <div style="margin-top:16px;max-width:460px">
+        <label style="margin-bottom:8px">Search depth</label>
+        <div class="dd" id="depth-dd">
+          <input type="hidden" id="depth" value="${curDepth}">
+          <button type="button" class="dd-toggle" id="depth-toggle" aria-haspopup="listbox" aria-expanded="false">
+            <span class="tier-dot" id="dd-dot" style="background:${cur[1]}"></span>
+            <span class="dd-label" id="dd-label">${cur[2]}</span>
+            ${ic('chevron', 'dd-caret')}
+          </button>
+          <div class="dd-menu" id="depth-menu" role="listbox" hidden>
+            ${TIERS.map(([v, dot, title, desc]) => `
+            <div class="dd-opt${v === curDepth ? ' sel' : ''}" role="option" data-v="${v}" data-dot="${dot}" data-title="${esc(title)}">
+              <span class="tier-dot" style="background:${dot}"></span>
+              <span class="tier-body"><span class="tier-title">${title}</span><span class="tier-desc">${desc}</span></span>
+              ${ic('checkCircle', 'ic-ok dd-check')}
+            </div>`).join('')}
+          </div>
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:8px">The grid adapts to the city's size — big cities get more zones automatically.</div>
+      </div>` : '';
   $('#main').innerHTML = `
     <h1>Find Leads</h1>
     <p class="subtitle">Search any niche in any city — every result is scored by sales opportunity.</p>
@@ -466,24 +564,50 @@ async function viewFind() {
         <div class="field"><label>Location</label><input id="loc" placeholder="e.g. Austin TX, Manchester UK" value="${esc(lastSearch?.location || '')}"></div>
         <button id="go">Search</button>
       </div>
-      ${feat().deep ? `
-      <div style="margin-top:14px;max-width:420px">
-        <label>Search depth</label>
-        <select id="depth">
-          <option value="quick" ${!lastSearch || lastSearch.depth === 'quick' ? 'selected' : ''}>🏃 Quick — first 20, a fast scout (~2s, cheapest)</option>
-          <option value="fast" ${lastSearch?.depth === 'fast' ? 'selected' : ''}>⚡ Fast — top 60 results (~4s)</option>
-          <option value="deep" ${lastSearch && (lastSearch.depth === 'deep' || lastSearch.deep) ? 'selected' : ''}>🌆 Deep — full city grid, hundreds of leads (~10s)</option>
-          <option value="exhaustive" ${lastSearch?.depth === 'exhaustive' ? 'selected' : ''}>🛰️ Exhaustive — maximum coverage (~15s, more API calls)</option>
-        </select>
-        <div class="muted" style="font-size:12px;margin-top:5px">The grid adapts to the city's size — big cities get more zones automatically.</div>
-      </div>` : ''}
-      ${isDemo() ? `<p class="muted mt" style="font-size:13px">🧪 Demo mode — sample data only. Enter an access code (Log out → code) for live results.</p>` : ''}
+      ${depthPicker}
+      ${isDemo() ? `<p class="muted mt" style="font-size:13px">${ic('beaker')} Demo mode — sample data only. Enter an access code (Log out → code) for live results.</p>` : ''}
     </div>
     <div id="results"></div>
   `;
   $('#go').onclick = runSearch;
   $('#kw').onkeydown = $('#loc').onkeydown = (e) => { if (e.key === 'Enter') runSearch(); };
+  wireDepthPicker();
   if (lastSearch?.results) renderResults(lastSearch);
+}
+
+// Custom search-depth dropdown: compact toggle + rich menu (coloured dot, title,
+// description per tier). Native <option> can't render those, so this is hand-built.
+// The chosen value lives in hidden #depth, read by runSearch.
+function wireDepthPicker() {
+  const dd = $('#depth-dd');
+  if (!dd) return;
+  const toggle = $('#depth-toggle');
+  const menu = $('#depth-menu');
+  const openMenu = () => { dd.classList.add('open'); menu.hidden = false; toggle.setAttribute('aria-expanded', 'true'); };
+  const closeMenu = () => { dd.classList.remove('open'); menu.hidden = true; toggle.setAttribute('aria-expanded', 'false'); };
+  toggle.onclick = (e) => { e.stopPropagation(); dd.classList.contains('open') ? closeMenu() : openMenu(); };
+  menu.querySelectorAll('.dd-opt').forEach((opt) => {
+    opt.onclick = () => {
+      $('#depth').value = opt.dataset.v;
+      $('#dd-label').textContent = opt.dataset.title;
+      $('#dd-dot').style.background = opt.dataset.dot;
+      menu.querySelectorAll('.dd-opt').forEach((o) => o.classList.toggle('sel', o === opt));
+      closeMenu();
+    };
+  });
+  // Close on outside-click / Escape — registered once, resolves the live picker.
+  if (!window.__ddWired) {
+    window.__ddWired = true;
+    const shut = () => {
+      const el = document.getElementById('depth-dd');
+      if (!el || !el.classList.contains('open')) return;
+      el.classList.remove('open');
+      const m = document.getElementById('depth-menu'); if (m) m.hidden = true;
+      const t = document.getElementById('depth-toggle'); if (t) t.setAttribute('aria-expanded', 'false');
+    };
+    document.addEventListener('click', (e) => { const el = document.getElementById('depth-dd'); if (el && !el.contains(e.target)) shut(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') shut(); });
+  }
 }
 
 // Trial/demo banner shown above search + results.
@@ -493,7 +617,7 @@ function trialBanner() {
 
   // BYOK: their key, their bill — the credit meter no longer applies to them.
   if (hasByok() && p.type !== 'demo') {
-    return `<div class="banner banner-info mb">🔑 <b>Using your own Google API key</b> — searches are unlimited and billed to your Google account. <a href="#/settings" style="color:var(--accent)">Manage key</a></div>`;
+    return `<div class="banner banner-info mb">${ic('key')} <b>Using your own Google API key</b> — searches are unlimited and billed to your Google account. <a href="#/settings" style="color:var(--accent)">Manage key</a></div>`;
   }
 
   if (p.type === 'trial') {
@@ -502,10 +626,10 @@ function trialBanner() {
     const credits = api === null || api === undefined
       ? ''
       : ` · <b>${api}</b> API credit${api === 1 ? '' : 's'} left`;
-    return `<div class="banner banner-warn mb">🎟️ <b>Trial account</b> — ${left} of ${p.searchLimit} searches left${credits} · up to ${p.resultCap} results each · exports &amp; sharing are disabled.<br><span style="font-size:12.5px">Add your own Google API key in <a href="#/settings" style="color:var(--accent)">Settings</a> for unlimited searches.</span></div>`;
+    return `<div class="banner banner-warn mb">${ic('ticket')} <b>Trial account</b> — ${left} of ${p.searchLimit} searches left${credits} · up to ${p.resultCap} results each · exports &amp; sharing are disabled.<br><span style="font-size:12.5px">Add your own Google API key in <a href="#/settings" style="color:var(--accent)">Settings</a> for unlimited searches.</span></div>`;
   }
   if (p.type === 'demo') {
-    return `<div class="banner banner-warn mb">🧪 <b>Demo mode</b> — sample data only. Log out and enter an access code for live results.</div>`;
+    return `<div class="banner banner-warn mb">${ic('beaker')} <b>Demo mode</b> — sample data only. Log out and enter an access code for live results.</div>`;
   }
   return '';
 }
@@ -771,9 +895,19 @@ function applyFilters(search) {
 }
 
 // Bulk-audit every listed website (concurrency-limited), then re-rank.
+// Auditing every site on a big deep search (Tokyo deep = 6,137 rows) would fire
+// thousands of fetches. Cap to the most valuable leads; make the cap explicit.
+const AUDIT_CAP = 50;
+
 async function auditAllWebsites(search, btn) {
-  const targets = search.results.filter((r) => r.website && !r.webAudit);
+  let targets = search.results.filter((r) => r.website && !r.webAudit);
   if (!targets.length) return toast('No un-audited websites to check');
+  const available = targets.length;
+  const capped = available > AUDIT_CAP;
+  if (capped) {
+    if (!confirm(`${available} un-audited sites found. Auditing them all would fire ${available} requests and take a while.\n\nAudit the top ${AUDIT_CAP} by opportunity instead? (Filter or narrow the search to reach the others.)`)) return;
+    targets = [...targets].sort((a, b) => combinedOpp(b) - combinedOpp(a)).slice(0, AUDIT_CAP);
+  }
   btn.disabled = true;
   const total = targets.length;
   let done = 0;
@@ -795,7 +929,9 @@ async function auditAllWebsites(search, btn) {
     }
   };
   await Promise.all(Array.from({ length: 4 }, worker));
-  toast(`Audited ${done} websites — re-ranked by combined opportunity`);
+  toast(capped
+    ? `Audited the top ${done} of ${available} by opportunity — narrow your filters to audit more.`
+    : `Audited ${done} websites — re-ranked by combined opportunity`);
   renderResults(search);
 }
 
@@ -805,21 +941,21 @@ function renderResults(search) {
   const auditable = search.results.filter((r) => r.website && !r.webAudit).length;
   const audited = search.results.filter((r) => r.webAudit).length;
   $('#results').innerHTML = `
-    ${search.mode === 'demo' ? `<div class="banner banner-warn mt">🧪 Demo data (deterministic sample). Add your Google Places API key in Settings for live business data.</div>` : search.deep ? `<div class="banner ${search.resolvedLevel === 'area' || search.incomplete ? 'banner-warn' : 'banner-info'} mt">${search.depth === 'exhaustive' ? '🛰️ Exhaustive scan' : '🌆 Deep search'} — covered <b>${esc(search.resolvedCity || search.location)}</b>, subdividing into ${search.cells} zones (depth ${search.depthReached}) and found ${search.results.length} unique businesses.${search.incomplete ? ` <br>⚠️ ${search.truncatedZones} zone${search.truncatedZones === 1 ? ' is' : 's are'} still denser than we can see — try <b>Exhaustive</b>, or search a narrower area.` : ''}${search.resolvedLevel === 'area' ? ' <br>⚠️ That matched a <b>district</b>, not a whole city — add a country for full coverage (e.g. “São Paulo, Brazil”).' : ''}</div>`
-      : search.cityResolved === false ? `<div class="banner banner-warn mt">⚠️ Couldn't pin down “${esc(search.location)}” as a city, so we searched the top 60 instead. Add a country or state for full-city coverage — e.g. <b>Springfield, Illinois</b> or <b>Cambridge, UK</b>.</div>`
-      : `<div class="banner banner-info mt">📡 Live Google data (top 60). Switch <b>Search depth</b> to Deep for full-city coverage.</div>`}
+    ${search.mode === 'demo' ? `<div class="banner banner-warn mt">${ic('beaker')} Demo data (deterministic sample). Add your Google Places API key in Settings for live business data.</div>` : search.deep ? `<div class="banner ${search.resolvedLevel === 'area' || search.incomplete ? 'banner-warn' : 'banner-info'} mt">${search.depth === 'exhaustive' ? ic('signal') + ' Exhaustive scan' : ic('building') + ' Deep search'} — covered <b>${esc(search.resolvedCity || search.location)}</b>, subdividing into ${search.cells} zones (depth ${search.depthReached}) and found ${search.results.length} unique businesses.${search.incomplete ? ` <br>${ic('alertTriangle')} ${search.truncatedZones} zone${search.truncatedZones === 1 ? ' is' : 's are'} still denser than we can see — try <b>Exhaustive</b>, or search a narrower area.` : ''}${search.resolvedLevel === 'area' ? ` <br>${ic('alertTriangle')} That matched a <b>district</b>, not a whole city — add a country for full coverage (e.g. “São Paulo, Brazil”).` : ''}</div>`
+      : search.cityResolved === false ? `<div class="banner banner-warn mt">${ic('alertTriangle')} Couldn't pin down “${esc(search.location)}” as a city, so we searched the top 60 instead. Add a country or state for full-city coverage — e.g. <b>Springfield, Illinois</b> or <b>Cambridge, UK</b>.</div>`
+      : `<div class="banner banner-info mt">${ic('signal')} Live Google data (top 60). Switch <b>Search depth</b> to Deep for full-city coverage.</div>`}
     <div class="filter-bar">
       <span class="muted" style="font-size:13px">${shown.length} of ${search.results.length} businesses${audited ? ` · ${audited} audited` : ''}</span>
-      ${chip('hot', '🔥 Hot leads (55+)', search)}
+      ${chip('hot', ic('flame') + ' Hot leads (55+)', search)}
       ${chip('noWebsite', 'No website', search)}
       ${chip('unclaimed', 'Unclaimed', search)}
       ${chip('lowRating', 'Rating < 4★', search)}
       ${chip('fewReviews', '< 25 reviews', search)}
-      ${audited ? chip('weakWeb', '🌐 Weak website', search) : ''}
+      ${audited ? chip('weakWeb', ic('globe') + ' Weak website', search) : ''}
       <span style="flex:1"></span>
-      ${auditable ? `<button class="btn-sm" id="audit-all">🌐 Audit all websites (${auditable})</button>` : ''}
-      <button class="btn-ghost btn-sm" id="save-all">💾 Save all shown</button>
-      ${feat().download ? `<button class="btn-ghost btn-sm" id="csv">⬇️ CSV</button>` : ''}
+      ${auditable ? `<button class="btn-sm" id="audit-all">${ic('globe')} ${auditable > AUDIT_CAP ? `Audit top ${AUDIT_CAP} websites` : `Audit all websites (${auditable})`}</button>` : ''}
+      <button class="btn-ghost btn-sm" id="save-all">${ic('save')} Save all shown</button>
+      ${feat().download ? `<button class="btn-ghost btn-sm" id="csv">${ic('download')} CSV</button>` : ''}
     </div>
     <div class="table-wrap">${leadsTable(shown, { saveBtn: true, saved, showWeb: audited > 0 })}</div>
   `;
@@ -845,7 +981,7 @@ function chip(key, label, search) {
 // -------- shared table
 function webCell(r) {
   if (!r.website) return '<span class="badge badge-red">missing</span>';
-  if (!r.webAudit) return '✅';
+  if (!r.webAudit) return ic('checkCircle', 'ic-ok');
   if (r.webAudit.reachable === false) return '<span class="badge badge-red">dead site</span>';
   const g = r.webAudit.grade;
   const cls = g === 'A' || g === 'B' ? 'badge-green' : g === 'C' ? 'badge-yellow' : 'badge-red';
@@ -934,7 +1070,7 @@ function wireSelection(afterDelete) {
 function bulkBarHtml() {
   return `<div class="bulk-bar" id="bulk-bar" style="display:none">
     <span id="bulk-count">0 selected</span>
-    <button class="btn-danger btn-sm" id="bulk-del">🗑 Delete selected</button>
+    <button class="btn-danger btn-sm" id="bulk-del">${ic('trash')} Delete selected</button>
     <button class="btn-ghost btn-sm" id="bulk-clear">Clear</button>
   </div>`;
 }
@@ -947,7 +1083,7 @@ function webAuditBlock(l) {
       <div class="card mb" style="padding:14px 16px">
         <div class="flex spread">
           <div>
-            <b>🌐 Website audit</b>
+            <b>${ic('globe')} Website audit</b>
             <div class="muted" style="font-size:13px">Their GMB may be strong — their website is where the deal often hides.</div>
           </div>
           <button class="btn-sm" id="run-webaudit">Run website audit</button>
@@ -958,9 +1094,9 @@ function webAuditBlock(l) {
     return `
       <h2 style="font-size:15px">Website audit ${gradeBadge(w.grade)}</h2>
       <div class="mb">
-        <div class="finding"><span class="icon">🔴</span>
+        <div class="finding"><span class="icon">${sevIcon('critical')}</span>
           <div><div><b>${esc(w.findings[0].text)}</b></div>
-          <div class="pitch">💰 ${esc(w.findings[0].pitch)}</div></div>
+          <div class="pitch">${ic('dollar','ic-pitch')} ${esc(w.findings[0].pitch)}</div></div>
         </div>
       </div>`;
   }
@@ -970,12 +1106,12 @@ function webAuditBlock(l) {
     <div class="mb">
       ${w.issues.map((f) => `
         <div class="finding">
-          <span class="icon">${f.severity === 'critical' ? '🔴' : f.severity === 'warning' ? '🟡' : 'ℹ️'}</span>
+          <span class="icon">${sevIcon(f.severity)}</span>
           <div><div>${esc(f.text)}</div>
-          ${f.pitch ? `<div class="pitch">💰 ${esc(f.pitch)}</div>` : ''}</div>
+          ${f.pitch ? `<div class="pitch">${ic('dollar','ic-pitch')} ${esc(f.pitch)}</div>` : ''}</div>
         </div>`).join('')}
-      ${passed.length ? `<div class="finding"><span class="icon">✅</span><div class="muted">${passed.length} checks passed: ${passed.map((f) => f.label).join(', ')}</div></div>` : ''}
-      ${w.emails?.length ? `<div class="finding"><span class="icon">📧</span><div><b>Email found on site:</b> ${w.emails.map(esc).join(', ')}</div></div>` : ''}
+      ${passed.length ? `<div class="finding"><span class="icon">${sevIcon('ok')}</span><div class="muted">${passed.length} checks passed: ${passed.map((f) => f.label).join(', ')}</div></div>` : ''}
+      ${w.emails?.length ? `<div class="finding"><span class="icon">${ic('mail')}</span><div><b>Email found on site:</b> ${w.emails.map(esc).join(', ')}</div></div>` : ''}
     </div>
     ${pageSpeedBlock(l)}`;
 }
@@ -988,7 +1124,7 @@ function pageSpeedBlock(l) {
       <div class="card mb" style="padding:14px 16px">
         <div class="flex spread">
           <div>
-            <b>⚡ Mobile speed test</b>
+            <b>${ic('zap')} Mobile speed test</b>
             <div class="muted" style="font-size:13px">Real Google Lighthouse score — hard numbers for your pitch. Takes ~15s.</div>
           </div>
           <button class="btn-sm" id="run-pagespeed">Run speed test</button>
@@ -996,13 +1132,13 @@ function pageSpeedBlock(l) {
       </div>`;
   }
   if (!p.ok) {
-    return `<div class="banner banner-warn mb">⚡ Speed test unavailable: ${esc(p.error || 'failed')}</div>`;
+    return `<div class="banner banner-warn mb">${ic('zap')} Speed test unavailable: ${esc(p.error || 'failed')}</div>`;
   }
   const ring = p.score >= 90 ? 'var(--green)' : p.score >= 50 ? 'var(--yellow)' : 'var(--red)';
   const m = p.metrics || {};
   const metricRow = (label, x) => x?.value ? `<div class="flex spread" style="font-size:13px"><span class="muted">${label}</span><span>${esc(x.value)}</span></div>` : '';
   return `
-    <h2 style="font-size:15px">⚡ Mobile speed ${gradeBadge(p.grade)}</h2>
+    <h2 style="font-size:15px">${ic('zap')} Mobile speed ${gradeBadge(p.grade)}</h2>
     <div class="flex mb" style="align-items:center;gap:16px">
       <div class="score-pill" style="min-width:56px;font-size:20px;background:${ring}22;color:${ring}">${p.score}</div>
       <div style="flex:1;min-width:180px">
@@ -1012,7 +1148,7 @@ function pageSpeedBlock(l) {
         ${metricRow('Cumulative Layout Shift', m.cls)}
       </div>
     </div>
-    ${!p.finding.ok ? `<div class="finding"><span class="icon">${p.finding.severity === 'critical' ? '🔴' : '🟡'}</span><div><div>${esc(p.finding.text)}</div><div class="pitch">💰 ${esc(p.finding.pitch)}</div></div></div>` : `<div class="finding"><span class="icon">✅</span><div>${esc(p.finding.text)}</div></div>`}`;
+    ${!p.finding.ok ? `<div class="finding"><span class="icon">${sevIcon(p.finding.severity)}</span><div><div>${esc(p.finding.text)}</div><div class="pitch">${ic('dollar','ic-pitch')} ${esc(p.finding.pitch)}</div></div></div>` : `<div class="finding"><span class="icon">${sevIcon('ok')}</span><div>${esc(p.finding.text)}</div></div>`}`;
 }
 
 // -------- competitor benchmark block (inside lead modal + report)
@@ -1020,7 +1156,7 @@ function pageSpeedBlock(l) {
 function reviewBlock(l) {
   const r = l.reviewInsight;
   if (!r) return '';
-  const icon = r.tier === 'perfect' ? '🏆' : r.tier === 'strong' ? '⭐' : r.tier === 'weak' ? '🔴' : '🟡';
+  const icon = r.tier === 'perfect' ? ic('trophy','ic-pitch') : r.tier === 'strong' ? ic('star','ic-pitch') : r.tier === 'weak' ? sevIcon('critical') : sevIcon('warning');
   return `
     <h2 style="font-size:15px">Review intelligence <span class="badge badge-muted" style="font-weight:400">estimated</span></h2>
     <div class="mb">
@@ -1028,11 +1164,11 @@ function reviewBlock(l) {
         <span class="icon">${icon}</span>
         <div>
           <div>${esc(r.headline)}</div>
-          <div class="pitch">💰 ${esc(r.pitch)}</div>
+          <div class="pitch">${ic('dollar','ic-pitch')} ${esc(r.pitch)}</div>
         </div>
       </div>
-      ${r.toTarget ? `<div class="finding"><span class="icon">📈</span><div><b>${r.toTarget.needed}</b> new 5★ reviews needed to reach ${r.toTarget.target}★</div></div>` : ''}
-      ${!r.perfect && r.starDeficit ? `<div class="finding"><span class="icon">📉</span><div class="muted">${r.starDeficit} stars short of a perfect record · derived from the public ${r.rating}★ average across ${r.count} reviews.</div></div>` : ''}
+      ${r.toTarget ? `<div class="finding"><span class="icon">${ic('trendUp')}</span><div><b>${r.toTarget.needed}</b> new 5★ reviews needed to reach ${r.toTarget.target}★</div></div>` : ''}
+      ${!r.perfect && r.starDeficit ? `<div class="finding"><span class="icon">${ic('trendDown','ic-info')}</span><div class="muted">${r.starDeficit} stars short of a perfect record · derived from the public ${r.rating}★ average across ${r.count} reviews.</div></div>` : ''}
     </div>`;
 }
 
@@ -1047,21 +1183,21 @@ function miningBlock(l) {
       <div class="card mb" style="padding:14px 16px">
         <div class="flex spread">
           <div>
-            <b>🧠 AI review mining</b>
+            <b>${ic('sparkles')} AI review mining</b>
             <div class="muted" style="font-size:13px">Read what customers actually wrote — real complaints, in their words, to quote on the call.</div>
           </div>
           ${locked
-            ? `<span class="badge badge-muted">🔒 Full plan</span>`
+            ? `<span class="badge badge-muted">${ic('lock')} Full plan</span>`
             : `<button class="btn-sm" id="run-mining">Mine reviews</button>`}
         </div>
       </div>`;
   }
   if (m.ok === false) {
-    return `<div class="banner banner-warn mb">🧠 Review mining unavailable: ${esc(m.error || 'failed')}</div>`;
+    return `<div class="banner banner-warn mb">${ic('sparkles')} Review mining unavailable: ${esc(m.error || 'failed')}</div>`;
   }
 
   const themeRow = (t) => {
-    const icon = t.sentiment === 'praise' ? '💚' : '🔴';
+    const icon = t.sentiment === 'praise' ? ic('heart','ic-praise') : sevIcon('critical');
     return `
       <div class="finding">
         <span class="icon">${icon}</span>
@@ -1072,7 +1208,7 @@ function miningBlock(l) {
                  <cite>— ${esc(t.quoteAuthor || 'a customer')}${t.quoteRating ? `, ${t.quoteRating}★` : ''}</cite>
                </blockquote>`
             : ''}
-          ${t.pitch ? `<div class="pitch">💰 ${esc(t.pitch)}</div>` : ''}
+          ${t.pitch ? `<div class="pitch">${ic('dollar','ic-pitch')} ${esc(t.pitch)}</div>` : ''}
         </div>
       </div>`;
   };
@@ -1081,27 +1217,27 @@ function miningBlock(l) {
   const sourceNote =
     m.source === 'demo' ? 'Demo data — enter an access code for live review mining.'
     : m.source === 'heuristic' ? 'Keyword analysis (the AI model was unavailable) — themes are literal keyword matches.'
-    : `Read by ${esc(m.model || 'AI')}.`;
+    : 'Read by AI.';
 
   return `
-    <h2 style="font-size:15px">🧠 What customers actually say
+    <h2 style="font-size:15px">${ic('sparkles')} What customers actually say
       <span class="badge badge-muted" style="font-weight:400">${m.source === 'ai' ? 'AI-read' : m.source === 'demo' ? 'demo' : 'keyword'}</span>
     </h2>
     <p class="muted" style="font-size:13px">${esc(m.summary || '')}</p>
     <div class="mb" style="margin-top:8px">
-      ${(m.themes || []).map(themeRow).join('') || '<div class="finding"><span class="icon">ℹ️</span><div class="muted">No recurring theme found in the reviews Google exposes.</div></div>'}
+      ${(m.themes || []).map(themeRow).join('') || `<div class="finding"><span class="icon">${sevIcon('info')}</span><div class="muted">No recurring theme found in the reviews Google exposes.</div></div>`}
     </div>
     ${negativeQuotes.length ? `
       <div class="card mb" style="padding:12px 14px">
         <div class="flex spread" style="gap:10px">
-          <div><b>✍️ Sellable deliverable</b>
+          <div><b>${ic('pen')} Sellable deliverable</b>
             <div class="muted" style="font-size:13px">Draft the owner's public reply to a negative review — something to hand over on the call.</div>
           </div>
           <button class="btn-sm" id="draft-reply">Draft a reply</button>
         </div>
       </div>` : ''}
     <p class="muted" style="font-size:12px;margin-bottom:14px">
-      ⚠️ Based on the <b>${m.sampled}</b> review${m.sampled === 1 ? '' : 's'} Google exposes${m.totalReviews ? ` of ${m.totalReviews} total` : ''} — Google returns only its “most relevant” few, which skew positive. Indicative, not exhaustive. ${sourceNote}
+      ${ic('alertTriangle','ic-warning')} Based on the <b>${m.sampled}</b> review${m.sampled === 1 ? '' : 's'} Google exposes${m.totalReviews ? ` of ${m.totalReviews} total` : ''} — Google returns only its “most relevant” few, which skew positive. Indicative, not exhaustive. ${sourceNote}
       ${m.cached ? ' <span title="Served from cache — no API cost">· cached</span>' : ''}
     </p>`;
 }
@@ -1111,9 +1247,9 @@ function competitorBlock(l) {
   if (!c || !c.marketSize) return '';
   const cmp = (label, you, avg, higherIsBetter = true) => {
     const behind = higherIsBetter ? (you || 0) < avg : (you || 0) > avg;
-    return `<div class="finding"><span class="icon">${behind ? '🔴' : '✅'}</span>
+    return `<div class="finding"><span class="icon">${behind ? sevIcon('critical') : sevIcon('ok')}</span>
       <div class="flex spread" style="flex:1"><span>${label}</span>
-      <span><b>${you ?? 0}</b> <span class="muted">vs ${avg} avg${behind ? ` · ${Math.abs(avg - (you || 0))} behind` : ''}</span></span></div></div>`;
+      <span><b>${you ?? 0}</b> <span class="muted">vs ${avg} avg${behind ? ` · ${+Math.abs(avg - (you || 0)).toFixed(1)} behind` : ''}</span></span></div></div>`;
   };
   return `
     <h2 style="font-size:15px">Competitor benchmark</h2>
@@ -1122,7 +1258,7 @@ function competitorBlock(l) {
       ${cmp('Reviews', l.reviewCount, c.avgReviews)}
       ${cmp('Rating', l.rating, c.avgRating)}
       ${cmp('Photos', l.photoCount, c.avgPhotos)}
-      <div class="finding"><span class="icon">${l.website ? '✅' : '🔴'}</span><div class="flex spread" style="flex:1"><span>Website</span><span><b>${l.website ? 'Yes' : 'No'}</b> <span class="muted">· ${c.pctWebsite}% of top ${c.topN} have one</span></span></div></div>
+      <div class="finding"><span class="icon">${l.website ? sevIcon('ok') : sevIcon('critical')}</span><div class="flex spread" style="flex:1"><span>Website</span><span><b>${l.website ? 'Yes' : 'No'}</b> <span class="muted">· ${c.pctWebsite}% of top ${c.topN} have one</span></span></div></div>
     </div>`;
 }
 
@@ -1189,7 +1325,7 @@ function demoSiteBlock(l) {
     <div class="card mb" style="padding:14px 16px">
       <div class="flex spread" style="gap:10px">
         <div>
-          <b>🎨 Demo website${noSite ? ' <span class="badge" style="background:var(--accent);color:#1a1205">best fit</span>' : ''}${url ? ' <span class="badge" style="background:var(--green);color:#04210f">published</span>' : ''}</b>
+          <b>${ic('palette')} Demo website${noSite ? ' <span class="badge" style="background:var(--accent);color:#1a1205">best fit</span>' : ''}${url ? ' <span class="badge" style="background:var(--green);color:#04210f">published</span>' : ''}</b>
           <div class="muted" style="font-size:13px">${noSite
             ? "They have no website — the strongest pitch is “I already built you a preview.” Generate a Stitch design brief from their own data."
             : 'Generate a Google Stitch design brief for a modern replacement site, built from their own data.'}</div>
@@ -1198,10 +1334,10 @@ function demoSiteBlock(l) {
       </div>
       ${url ? `
       <div class="banner banner-info" style="margin-top:12px;font-size:13px">
-        🌐 <b>Live preview:</b> <a href="${esc(url)}" target="_blank" style="color:var(--accent);word-break:break-all">${esc(url)} ↗</a>
+        ${ic('globe')} <b>Live preview:</b> <a href="${esc(url)}" target="_blank" style="color:var(--accent);word-break:break-all">${esc(url)} ↗</a>
         <div class="flex mt" style="gap:8px">
           <button class="btn-sm" id="copy-demo-url">Copy link</button>
-          <button class="btn-sm btn-ghost" id="wa-demo-url">💬 Send on WhatsApp</button>
+          <button class="btn-sm btn-ghost" id="wa-demo-url">${ic('chat')} Send on WhatsApp</button>
           <button class="btn-sm btn-ghost" id="update-demo">Update / re-publish</button>
         </div>
       </div>` : ''}
@@ -1214,7 +1350,7 @@ function openStitchPromptModal(lead) {
     <div class="modal-overlay" id="overlay">
       <div class="modal">
         <button class="modal-close" id="close">✕</button>
-        <h2>🎨 Stitch prompt — ${esc(lead.name)}</h2>
+        <h2>${ic('palette')} Stitch prompt — ${esc(lead.name)}</h2>
         <p class="muted mb">Built from this lead's own Google data${lead.reviewMining ? ' and mined reviews' : ''}. Paste it into Google Stitch to generate the design, then bring the export into the Template Studio.</p>
         <div class="flex spread"><label>Design brief</label><button class="btn-ghost btn-sm" id="copy-stitch">Copy</button></div>
         <textarea class="script" id="stitch-text" rows="10">${esc(prompt)}</textarea>
@@ -1328,7 +1464,7 @@ function mapCardHtml(cls, place, gradient) {
   const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place)}`;
   const safe = place.replace(/[<>&"]/g, '');
   return `<a href="${url}" target="_blank" rel="noopener" class="${cls}" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-decoration:none;width:100%;height:100%;min-height:220px;padding:20px;text-align:center;background:${gradient};color:#1f3a5c">`
-    + `<span style="font-size:34px">📍</span>`
+    + `${ic('pin','ic-xl')}`
     + `<span style="font-weight:700;font-size:15px;line-height:1.4">${safe}</span>`
     + `<span style="font-size:13px;font-weight:600;text-decoration:underline">Get directions on Google Maps ↗</span>`
     + `</a>`;
@@ -1420,11 +1556,11 @@ function openImportSiteModal(lead) {
     <div class="modal-overlay" id="overlay">
       <div class="modal">
         <button class="modal-close" id="close">✕</button>
-        <h2>📥 Import & publish — ${esc(lead.name)}</h2>
+        <h2>${ic('inbox')} Import & publish — ${esc(lead.name)}</h2>
         <p class="muted mb">Paste the <b>Code to Clipboard</b> export from Stitch. It publishes to a private, shareable link you can send the prospect.</p>
 
         <div class="banner banner-warn mb" style="font-size:13px">
-          ⚠️ <b>Stitch invents content.</b> It commonly fabricates testimonials and opening hours. Before you send this to a real business, open the preview and make sure every review and detail is real.
+          ${ic('alertTriangle')} <b>Stitch invents content.</b> It commonly fabricates testimonials and opening hours. Before you send this to a real business, open the preview and make sure every review and detail is real.
           ${reviews.length
             ? `<div style="margin-top:8px">This lead's <b>real</b> reviews (use these, delete any others Stitch invented):</div>
                <ul style="margin:6px 0 0 16px">${reviews.map((r) => `<li>“${esc(r.text)}”${r.who ? ` — ${esc(r.who)}` : ''}</li>`).join('')}</ul>`
@@ -1462,10 +1598,10 @@ function openImportSiteModal(lead) {
     if (!html.trim()) { box.innerHTML = ''; return; }
     const fakes = flagFabricatedQuotes(html, lead);
     if (!fakes.length) {
-      box.innerHTML = `<div class="banner banner-info" style="font-size:12.5px">✅ No fabricated-looking quotes detected — every quoted line matches a real review (or there are none).</div>`;
+      box.innerHTML = `<div class="banner banner-info" style="font-size:12.5px">${ic('checkCircle','ic-ok')} No fabricated-looking quotes detected — every quoted line matches a real review (or there are none).</div>`;
     } else {
       box.innerHTML = `<div class="banner banner-warn" style="font-size:12.5px">
-        🚩 <b>${fakes.length} quote${fakes.length === 1 ? '' : 's'} not found in this lead's real reviews</b> — likely invented by Stitch. Delete ${fakes.length === 1 ? 'it' : 'them'} from the HTML above:
+        ${ic('flag','ic-warning')} <b>${fakes.length} quote${fakes.length === 1 ? '' : 's'} not found in this lead's real reviews</b> — likely invented by Stitch. Delete ${fakes.length === 1 ? 'it' : 'them'} from the HTML above:
         <ul style="margin:6px 0 0 16px">${fakes.map((q) => `<li>“${esc(q.slice(0, 120))}${q.length > 120 ? '…' : ''}”</li>`).join('')}</ul>
       </div>`;
     }
@@ -1488,7 +1624,7 @@ function openImportSiteModal(lead) {
       if (await store.get(lead.placeId || lead.id)) await store.update(lead.id, { demoSiteId: data.id });
       $('#publish-result').innerHTML = `
         <div class="banner banner-info" style="font-size:13px">
-          ✅ Published. <a href="${esc(data.url)}" target="_blank" style="color:var(--accent)"><b>${esc(data.url)}</b> ↗</a>
+          ${ic('checkCircle','ic-ok')} Published. <a href="${esc(data.url)}" target="_blank" style="color:var(--accent)"><b>${esc(data.url)}</b> ↗</a>
           <div class="flex mt"><button class="btn-sm" id="copy-site-url">Copy link</button> <a class="btn-sm btn-ghost" href="${esc(data.url)}?p=1" target="_blank">Preview</a></div>
         </div>`;
       $('#copy-site-url').onclick = () => { navigator.clipboard.writeText(data.url); toast('Preview link copied'); };
@@ -1516,16 +1652,16 @@ async function openLeadModal(lead) {
         <div class="flex mb mt">
           ${scorePill(l.opportunityScore)} <span class="muted" style="font-size:13px">opportunity</span>
           ${gradeBadge(l.grade)}
-          ${l.phone ? `<span class="badge badge-muted">📞 ${esc(l.phone)}</span>` : ''}
-          ${l.website ? `<a class="badge badge-muted" href="${esc(l.website)}" target="_blank" style="text-decoration:none">🌐 website ↗</a>` : ''}
+          ${l.phone ? `<span class="badge badge-muted">${ic('phone')} ${esc(l.phone)}</span>` : ''}
+          ${l.website ? `<a class="badge badge-muted" href="${esc(l.website)}" target="_blank" style="text-decoration:none">${ic('globe')} website ↗</a>` : ''}
         </div>
         <h2 style="font-size:15px">GMB audit findings</h2>
         <div class="mb">
           ${l.findings.map((f) => `
             <div class="finding">
-              <span class="icon">${f.ok ? '✅' : f.severity === 'critical' ? '🔴' : f.severity === 'warning' ? '🟡' : 'ℹ️'}</span>
+              <span class="icon">${f.ok ? sevIcon('ok') : sevIcon(f.severity)}</span>
               <div><div>${esc(f.text)} <span class="muted" style="font-size:12px">(${f.points}/${f.max} pts)</span></div>
-              ${f.pitch ? `<div class="pitch">💰 ${esc(f.pitch)}</div>` : ''}</div>
+              ${f.pitch ? `<div class="pitch">${ic('dollar','ic-pitch')} ${esc(f.pitch)}</div>` : ''}</div>
             </div>`).join('')}
         </div>
         ${l.website ? webAuditBlock(l) : ''}
@@ -1542,13 +1678,13 @@ async function openLeadModal(lead) {
         <div class="flex mt spread">
           <div class="flex">
             ${isSaved
-              ? `<a class="btn" href="#/report/${encodeURIComponent(l.id)}">📄 Audit report</a>`
-              : `<button id="save-lead">💾 Save lead</button>`}
-            <button class="btn-wa" id="wa-quick">💬 WhatsApp</button>
+              ? `<a class="btn" href="#/report/${encodeURIComponent(l.id)}">${ic('file')} Audit report</a>`
+              : `<button id="save-lead">${ic('save')} Save lead</button>`}
+            <button class="btn-wa" id="wa-quick">${ic('chat')} WhatsApp</button>
             ${(leadEmail(l) || l.website)
-              ? `<button class="btn-ghost" id="email-quick">📧 Email</button>`
-              : `<button class="btn-ghost" id="email-quick" disabled title="No website on this listing, so there's no email to find — reach them by WhatsApp or phone." style="opacity:.45;cursor:not-allowed">📧 Email</button>`}
-            <button class="btn-ghost" id="outreach">✉️ Scripts</button>
+              ? `<button class="btn-ghost" id="email-quick">${ic('mail')} Email</button>`
+              : `<button class="btn-ghost" id="email-quick" disabled title="No website on this listing, so there's no email to find — reach them by WhatsApp or phone." style="opacity:.45;cursor:not-allowed">${ic('mail')} Email</button>`}
+            <button class="btn-ghost" id="outreach">${ic('mail')} Scripts</button>
           </div>
           <div class="flex">
             <button class="btn-ghost" id="close-bottom">✕ Close</button>
@@ -1747,18 +1883,18 @@ function openOutreachModal(lead) {
         <h2>Outreach — ${esc(lead.name)}</h2>
         <p class="muted mb">Personalized from this business's actual audit findings.</p>
 
-        <div class="flex spread"><label>💬 WhatsApp message ${num ? `<span class="muted">→ ${esc(lead.phoneIntl || lead.phone || '')}</span>` : '<span class="muted">(no number — you’ll pick the contact)</span>'}</label><button class="btn-ghost btn-sm" data-copy="wa">Copy</button></div>
+        <div class="flex spread"><label>${ic('chat')} WhatsApp message ${num ? `<span class="muted">→ ${esc(lead.phoneIntl || lead.phone || '')}</span>` : '<span class="muted">(no number — you’ll pick the contact)</span>'}</label><button class="btn-ghost btn-sm" data-copy="wa">Copy</button></div>
         <textarea class="script" id="script-wa" rows="9">${esc(whatsapp)}</textarea>
-        <button class="btn-wa mt" id="wa-send" style="width:100%">💬 Open in WhatsApp with this message</button>
+        <button class="btn-wa mt" id="wa-send" style="width:100%">${ic('chat')} Open in WhatsApp with this message</button>
 
-        ${lead.webAudit?.emails?.length ? `<div class="banner banner-info mt">📧 Send email to: <b>${lead.webAudit.emails.map(esc).join(', ')}</b> <span class="muted">(found on their website)</span></div>` : ''}
+        ${lead.webAudit?.emails?.length ? `<div class="banner banner-info mt">${ic('mail')} Send email to: <b>${lead.webAudit.emails.map(esc).join(', ')}</b> <span class="muted">(found on their website)</span></div>` : ''}
         <div class="flex spread mt"><label>Cold email</label><button class="btn-ghost btn-sm" data-copy="email">Copy</button></div>
         <textarea class="script" id="script-email" rows="11">${esc(email)}</textarea>
-        <button class="btn mt" id="email-send" style="width:100%">📧 Open in email${leadEmail(lead) ? ` — to ${esc(leadEmail(lead))}` : ' (add the recipient)'}</button>
+        <button class="btn mt" id="email-send" style="width:100%">${ic('mail')} Open in email${leadEmail(lead) ? ` — to ${esc(leadEmail(lead))}` : ' (add the recipient)'}</button>
         ${leadEmail(lead) ? ''
           : lead.website
             ? `<p class="muted" style="font-size:12px;margin-top:4px">No email found yet — run the website audit on this lead to pull their contact address, or add it in your mail app.</p>`
-            : `<p class="muted" style="font-size:12px;margin-top:4px">⚠️ This listing has no website, so there's no email to find. Reach them by WhatsApp or phone — or paste an address you found elsewhere.</p>`}
+            : `<p class="muted" style="font-size:12px;margin-top:4px">${ic('alertTriangle','ic-warning')} This listing has no website, so there's no email to find. Reach them by WhatsApp or phone — or paste an address you found elsewhere.</p>`}
         <div class="flex spread mt"><label>Phone script</label><button class="btn-ghost btn-sm" data-copy="call">Copy</button></div>
         <textarea class="script" id="script-call" rows="11">${esc(call)}</textarea>
         <button class="btn-ghost mt" id="close-bottom" style="width:100%">✕ Close</button>
@@ -1868,7 +2004,7 @@ function openReplyModal(lead, selected = 0, tone = REPLY_TONES[0]) {
       if (!res.ok) throw new Error(data.error || 'Draft failed');
       box.value = data.text;
       note.textContent = data.source === 'ai'
-        ? `Written by ${data.model}. Edit before posting.`
+        ? 'Written by AI. Edit before posting.'
         : 'Template draft (the AI model was unavailable). Edit before posting.';
     } catch (e) {
       box.placeholder = 'Could not generate a draft.';
@@ -1893,7 +2029,7 @@ async function viewLeads() {
           <button class="seg-btn ${leadsView === 'board' ? 'on' : ''}" data-view="board">▦ Board</button>
           <button class="seg-btn ${leadsView === 'list' ? 'on' : ''}" data-view="list">☰ List</button>
         </div>` : ''}
-        ${feat().download ? `<button class="btn-ghost btn-sm" id="csv-all" ${leads.length ? '' : 'disabled'}>⬇️ Export CSV</button>` : ''}
+        ${feat().download ? `<button class="btn-ghost btn-sm" id="csv-all" ${leads.length ? '' : 'disabled'}>${ic('download')} Export CSV</button>` : ''}
       </div>
     </div>
     ${leads.length === 0
@@ -1906,7 +2042,7 @@ async function viewLeads() {
             return `<div class="pipe-col"><h3>${STATUS_LABEL[st]} · ${col.length}</h3>
               ${col.map((l) => `
                 <div class="lead-card" data-id="${esc(l.id)}">
-                  <div class="name">${esc(l.name)}${l.demoSiteId ? ' <span title="Demo website published">🌐</span>' : ''}</div>
+                  <div class="name">${esc(l.name)}${l.demoSiteId ? ` <span title="Demo website published">${ic('globe')}</span>` : ''}</div>
                   <div class="meta"><span>${esc(l.keyword || '')}</span>${scorePill(l.opportunityScore)}</div>
                 </div>`).join('')}
             </div>`;
@@ -1996,7 +2132,7 @@ async function viewReport(id) {
   $('#main').innerHTML = `
     <div class="flex spread mb no-print">
       <a class="btn-ghost btn-sm" href="#/leads">← Back</a>
-      ${feat().download ? `<button onclick="window.print()">🖨️ Print / Save as PDF</button>` : ''}
+      ${feat().download ? `<button onclick="window.print()">${ic('printer')} Print / Save as PDF</button>` : ''}
     </div>
     <div class="card mb no-print" id="share-panel"><p class="muted">Loading share options…</p></div>
     <div class="report-page">
@@ -2008,7 +2144,7 @@ async function viewReport(id) {
       </div>
       <h1 style="font-size:26px">Google Business Profile Audit</h1>
       <p style="color:#4a5568">${esc(lead.name)} · ${esc(lead.address)}</p>
-      <p style="color:#718096;font-size:13px">Prepared ${new Date().toLocaleDateString()} · Searched as "${esc(lead.keyword)}" in ${esc(lead.location)}</p>
+      <p style="color:#718096;font-size:13px">Prepared ${new Date(lead.savedAt || lead.createdAt || Date.now()).toLocaleDateString()} · Searched as "${esc(lead.keyword)}" in ${esc(lead.location)}</p>
 
       <div class="report-grade">
         <div class="report-score-ring" style="background:conic-gradient(${ringColor} ${lead.healthScore * 3.6}deg, #e2e8f0 0deg)">
@@ -2024,42 +2160,42 @@ async function viewReport(id) {
         <div class="report-meta-grid">
           <span class="k">Star rating</span><span>${lead.rating ? lead.rating + ' ★' : 'No rating'}</span>
           <span class="k">Reviews</span><span>${lead.reviewCount ?? 0}</span>
-          <span class="k">Website</span><span>${lead.website ? 'Yes' : '❌ Missing'}</span>
-          <span class="k">Phone</span><span>${lead.phone || '❌ Missing'}</span>
+          <span class="k">Website</span><span>${lead.website ? 'Yes' : ic('x','ic-critical') + ' Missing'}</span>
+          <span class="k">Phone</span><span>${lead.phone || (ic('x','ic-critical') + ' Missing')}</span>
           <span class="k">Photos</span><span>${lead.photoCount ?? 0}</span>
-          <span class="k">Hours listed</span><span>${lead.hasHours ? 'Yes' : '❌ Missing'}</span>
+          <span class="k">Hours listed</span><span>${lead.hasHours ? 'Yes' : ic('x','ic-critical') + ' Missing'}</span>
         </div>
       </div>
 
-      ${critical.length ? `<div class="report-section"><h2>🔴 Critical issues (${critical.length})</h2>
-        ${critical.map((i) => `<div class="report-finding"><span>🔴</span><div><b>${esc(i.text)}</b>${i.pitch ? `<div class="pitch">${esc(i.pitch)}</div>` : ''}</div></div>`).join('')}</div>` : ''}
+      ${critical.length ? `<div class="report-section"><h2>${sevIcon('critical')} Critical issues (${critical.length})</h2>
+        ${critical.map((i) => `<div class="report-finding"><span>${sevIcon('critical')}</span><div><b>${esc(i.text)}</b>${i.pitch ? `<div class="pitch">${esc(i.pitch)}</div>` : ''}</div></div>`).join('')}</div>` : ''}
 
-      ${other.length ? `<div class="report-section"><h2>🟡 Improvement opportunities (${other.length})</h2>
-        ${other.map((i) => `<div class="report-finding"><span>🟡</span><div><b>${esc(i.text)}</b>${i.pitch ? `<div class="pitch">${esc(i.pitch)}</div>` : ''}</div></div>`).join('')}</div>` : ''}
+      ${other.length ? `<div class="report-section"><h2>${sevIcon('warning')} Improvement opportunities (${other.length})</h2>
+        ${other.map((i) => `<div class="report-finding"><span>${sevIcon('warning')}</span><div><b>${esc(i.text)}</b>${i.pitch ? `<div class="pitch">${esc(i.pitch)}</div>` : ''}</div></div>`).join('')}</div>` : ''}
 
-      <div class="report-section"><h2>✅ What's working</h2>
-        ${lead.findings.filter((f) => f.ok).map((f) => `<div class="report-finding"><span>✅</span><div>${esc(f.text)}</div></div>`).join('')}
+      <div class="report-section"><h2>${sevIcon('ok')} What's working</h2>
+        ${lead.findings.filter((f) => f.ok).map((f) => `<div class="report-finding"><span>${sevIcon('ok')}</span><div>${esc(f.text)}</div></div>`).join('')}
       </div>
 
       ${lead.reviewInsight ? `
       <div class="report-section">
-        <h2>⭐ Review Intelligence</h2>
+        <h2>${ic('star','ic-pitch')} Review Intelligence</h2>
         <p style="color:#4a5568;font-size:14px"><b>${esc(lead.reviewInsight.clientHeadline || lead.reviewInsight.headline)}</b></p>
-        <div class="report-finding" style="margin-top:8px"><span>💰</span><div>${esc(lead.reviewInsight.clientPitch || lead.reviewInsight.pitch)}</div></div>
-        ${lead.reviewInsight.toTarget ? `<div class="report-finding"><span>📈</span><div><b>${lead.reviewInsight.toTarget.needed}</b> new 5-star reviews would lift the average to ${lead.reviewInsight.toTarget.target}★.</div></div>` : ''}
+        <div class="report-finding" style="margin-top:8px"><span>${ic('dollar','ic-pitch')}</span><div>${esc(lead.reviewInsight.clientPitch || lead.reviewInsight.pitch)}</div></div>
+        ${lead.reviewInsight.toTarget ? `<div class="report-finding"><span>${ic('trendUp','ic-info')}</span><div><b>${lead.reviewInsight.toTarget.needed}</b> new 5-star reviews would lift the average to ${lead.reviewInsight.toTarget.target}★.</div></div>` : ''}
         <p style="color:#94a3b8;font-size:12px;margin-top:8px">Estimated from the public ${lead.reviewInsight.rating}★ average across ${lead.reviewInsight.count} reviews.</p>
       </div>` : ''}
 
       ${(() => {
         const cm = clientMining(lead.reviewMining);
         if (!cm || !cm.themes.length) return '';
-        const row = (t) => `<div class="report-finding"><span>${t.sentiment === 'praise' ? '💚' : '🔴'}</span><div>
+        const row = (t) => `<div class="report-finding"><span>${t.sentiment === 'praise' ? ic('heart','ic-praise') : sevIcon('critical')}</span><div>
           <b>${esc(t.label)}</b>
           ${t.quote ? `<blockquote class="review-quote">“${esc(t.quote)}”<cite>— ${esc(t.quoteAuthor || 'a customer')}${t.quoteRating ? `, ${t.quoteRating}★` : ''}</cite></blockquote>` : ''}
         </div></div>`;
         return `
         <div class="report-section">
-          <h2>🗣️ What your customers are saying</h2>
+          <h2>${ic('megaphone')} What your customers are saying</h2>
           <p style="color:#4a5568;font-size:14px">${esc(cm.clientSummary)}</p>
           <div style="margin-top:8px">${cm.themes.map(row).join('')}</div>
           <p style="color:#94a3b8;font-size:12px;margin-top:8px">Based on the ${cm.sampled} review${cm.sampled === 1 ? '' : 's'} Google displays publicly${cm.totalReviews ? ` of ${cm.totalReviews} total` : ''}. Quotes are reproduced verbatim.</p>
@@ -2068,30 +2204,30 @@ async function viewReport(id) {
 
       ${lead.webAudit ? `
       <div class="report-section">
-        <h2>🌐 Website audit — Grade ${lead.webAudit.grade} (${lead.webAudit.websiteScore}/100)</h2>
+        <h2>${ic('globe')} Website audit — Grade ${lead.webAudit.grade} (${lead.webAudit.websiteScore}/100)</h2>
         ${lead.webAudit.reachable === false
-          ? `<div class="report-finding"><span>🔴</span><div><b>${esc(lead.webAudit.findings[0].text)}</b><div class="pitch">${esc(lead.webAudit.findings[0].pitch)}</div></div></div>`
+          ? `<div class="report-finding"><span>${sevIcon('critical')}</span><div><b>${esc(lead.webAudit.findings[0].text)}</b><div class="pitch">${esc(lead.webAudit.findings[0].pitch)}</div></div></div>`
           : `
-            ${lead.webAudit.issues.map((i) => `<div class="report-finding"><span>${i.severity === 'critical' ? '🔴' : i.severity === 'warning' ? '🟡' : 'ℹ️'}</span><div><b>${esc(i.text)}</b>${i.pitch ? `<div class="pitch">${esc(i.pitch)}</div>` : ''}</div></div>`).join('')}
-            ${lead.webAudit.findings.filter((f) => f.ok).map((f) => `<div class="report-finding"><span>✅</span><div>${esc(f.text)}</div></div>`).join('')}
+            ${lead.webAudit.issues.map((i) => `<div class="report-finding"><span>${sevIcon(i.severity)}</span><div><b>${esc(i.text)}</b>${i.pitch ? `<div class="pitch">${esc(i.pitch)}</div>` : ''}</div></div>`).join('')}
+            ${lead.webAudit.findings.filter((f) => f.ok).map((f) => `<div class="report-finding"><span>${sevIcon('ok')}</span><div>${esc(f.text)}</div></div>`).join('')}
           `}
       </div>` : ''}
 
       ${lead.pageSpeed?.ok ? `
       <div class="report-section">
-        <h2>⚡ Mobile Speed — ${lead.pageSpeed.score}/100 (Grade ${lead.pageSpeed.grade})</h2>
+        <h2>${ic('zap')} Mobile Speed — ${lead.pageSpeed.score}/100 (Grade ${lead.pageSpeed.grade})</h2>
         <div class="report-meta-grid">
           ${lead.pageSpeed.metrics.lcp?.value ? `<span class="k">Largest Contentful Paint</span><span>${esc(lead.pageSpeed.metrics.lcp.value)}</span>` : ''}
           ${lead.pageSpeed.metrics.si?.value ? `<span class="k">Speed Index</span><span>${esc(lead.pageSpeed.metrics.si.value)}</span>` : ''}
           ${lead.pageSpeed.metrics.tbt?.value ? `<span class="k">Total Blocking Time</span><span>${esc(lead.pageSpeed.metrics.tbt.value)}</span>` : ''}
           ${lead.pageSpeed.metrics.cls?.value ? `<span class="k">Cumulative Layout Shift</span><span>${esc(lead.pageSpeed.metrics.cls.value)}</span>` : ''}
         </div>
-        ${!lead.pageSpeed.finding.ok ? `<div class="report-finding" style="margin-top:10px"><span>${lead.pageSpeed.finding.severity === 'critical' ? '🔴' : '🟡'}</span><div><b>${esc(lead.pageSpeed.finding.text)}</b><div class="pitch">${esc(lead.pageSpeed.finding.pitch)}</div></div></div>` : ''}
+        ${!lead.pageSpeed.finding.ok ? `<div class="report-finding" style="margin-top:10px"><span>${sevIcon(lead.pageSpeed.finding.severity)}</span><div><b>${esc(lead.pageSpeed.finding.text)}</b><div class="pitch">${esc(lead.pageSpeed.finding.pitch)}</div></div></div>` : ''}
       </div>` : ''}
 
       ${lead.competitors?.marketSize ? `
       <div class="report-section">
-        <h2>📊 Competitor Benchmark</h2>
+        <h2>${ic('barChart')} Competitor Benchmark</h2>
         <p style="color:#4a5568;font-size:14px">Ranked <b>#${lead.competitors.rankByReviews}</b> of ${lead.competitors.marketSize} by review volume for "${esc(lead.keyword)}" in ${esc(lead.location)}. Here's how you compare to the top ${lead.competitors.topN} competitors:</p>
         <div class="report-meta-grid" style="margin-top:10px">
           <span class="k">Reviews</span><span>${lead.reviewCount ?? 0} <span style="color:#718096">vs ${lead.competitors.avgReviews} avg${(lead.reviewCount || 0) < lead.competitors.avgReviews ? ` (${lead.competitors.avgReviews - (lead.reviewCount || 0)} behind)` : ''}</span></span>
@@ -2103,7 +2239,7 @@ async function viewReport(id) {
 
       ${lead.demoSiteId ? `
       <div class="report-section">
-        <h2>🌐 Your new website — ready to preview</h2>
+        <h2>${ic('globe')} Your new website — ready to preview</h2>
         <p style="color:#4a5568;font-size:14px">We've already built a preview of a modern website for ${esc(lead.name)}. Take a look:</p>
         <p style="margin-top:8px"><a href="${esc(demoSiteUrl(lead))}" style="color:#146682;font-weight:700;word-break:break-all">${esc(demoSiteUrl(lead))}</a></p>
         <p style="color:#94a3b8;font-size:12px;margin-top:6px">A live preview — click to open it in your browser.</p>
@@ -2198,8 +2334,8 @@ async function renderSharePanel(lead) {
   if (!feat().share) {
     panel.innerHTML = `
       <div class="flex spread">
-        <div><b>🌐 Share this report</b><div class="muted" style="font-size:13px">Publishing a live, trackable report link is available on the full plan.</div></div>
-        <span class="badge badge-muted">🔒 Locked</span>
+        <div><b>${ic('globe')} Share this report</b><div class="muted" style="font-size:13px">Publishing a live, trackable report link is available on the full plan.</div></div>
+        <span class="badge badge-muted">${ic('lock')} Locked</span>
       </div>`;
     return;
   }
@@ -2207,7 +2343,7 @@ async function renderSharePanel(lead) {
   if (!url) {
     panel.innerHTML = `
       <div class="flex spread">
-        <div><b>🌐 Share this report</b><div class="muted" style="font-size:13px">Publish a live link you can send on WhatsApp — you'll see when they open it.</div></div>
+        <div><b>${ic('globe')} Share this report</b><div class="muted" style="font-size:13px">Publish a live link you can send on WhatsApp — you'll see when they open it.</div></div>
         <button id="publish-report">Publish shareable link</button>
       </div>`;
     $('#publish-report').onclick = () => publishReport(lead);
@@ -2216,11 +2352,11 @@ async function renderSharePanel(lead) {
 
   // published — show link, share buttons, live stats
   panel.innerHTML = `
-    <div class="flex spread mb"><b>🌐 Shared report</b> <span class="muted" id="views-stat" style="font-size:13px">checking opens…</span></div>
+    <div class="flex spread mb"><b>${ic('globe')} Shared report</b> <span class="muted" id="views-stat" style="font-size:13px">checking opens…</span></div>
     <div class="flex" style="gap:8px">
       <input id="report-url" value="${esc(url)}" readonly style="flex:1">
       <button class="btn-sm" id="copy-url">Copy</button>
-      <button class="btn-wa btn-sm" id="wa-report">💬 Send</button>
+      <button class="btn-wa btn-sm" id="wa-report">${ic('chat')} Send</button>
       <a class="btn-ghost btn-sm" href="${esc(url)}?p=1" target="_blank">Preview</a>
       <button class="btn-ghost btn-sm" id="republish">Re-publish</button>
     </div>`;
@@ -2243,7 +2379,7 @@ async function loadViewStats(id) {
     const el = $('#views-stat');
     if (!el) return;
     el.innerHTML = v.views > 0
-      ? `<span class="badge badge-green">👁 Opened ${v.views}×</span> last ${relTime(v.last)}`
+      ? `<span class="badge badge-green">${ic('eye')} Opened ${v.views}×</span> last ${relTime(v.last)}`
       : `<span class="badge badge-muted">not opened yet</span>`;
   } catch { /* ignore */ }
 }
@@ -2278,7 +2414,7 @@ async function viewSettings() {
     <p class="subtitle">Branding appears on your audit reports. Keys are stored only in this browser.</p>
 
     <div class="card mb">
-      <h2 style="margin-top:0">🏢 Agency branding</h2>
+      <h2 style="margin-top:0">${ic('building')} Agency branding</h2>
       <div class="grid" style="grid-template-columns:1fr 1fr">
         <div><label>Agency name</label><input id="s-name" value="${esc(s.agencyName || '')}" placeholder="Acme Digital"></div>
         <div><label>Tagline</label><input id="s-tag" value="${esc(s.agencyTagline || '')}" placeholder="Local Marketing Specialists"></div>
@@ -2289,7 +2425,7 @@ async function viewSettings() {
     </div>
 
     <div class="card mb">
-      <h2 style="margin-top:0">💬 WhatsApp outreach</h2>
+      <h2 style="margin-top:0">${ic('chat')} WhatsApp outreach</h2>
       <div class="grid" style="grid-template-columns:1fr 1fr">
         <div><label>Greeting</label><input id="s-wagreet" value="${esc(s.waGreeting || '')}" placeholder="Hello / Assalam o Alaikum / Hi"></div>
         <div><label>Default country code <span class="muted">(fallback only)</span></label><input id="s-wacc" value="${esc(s.waCountryCode || '')}" placeholder="92 for Pakistan, 1 for US"></div>
@@ -2298,7 +2434,7 @@ async function viewSettings() {
     </div>
 
     <div class="card mb">
-      <h2 style="margin-top:0">🔑 Your Google API key ${hasByok() ? '<span class="badge" style="background:var(--green);color:#04210f">connected</span>' : '<span class="badge badge-muted">not set</span>'}</h2>
+      <h2 style="margin-top:0">${ic('key')} Your Google API key ${hasByok() ? '<span class="badge" style="background:var(--green);color:#04210f">connected</span>' : '<span class="badge badge-muted">not set</span>'}</h2>
       <p class="muted" style="font-size:13.5px">
         Add your own key and your searches become <b>unlimited</b> — they bill your Google account directly, not ours,
         and we stop counting your API credits.
@@ -2306,11 +2442,11 @@ async function viewSettings() {
       <label>Google API key</label>
       <input id="s-gkey" type="password" value="${esc(s.googleApiKey || '')}" placeholder="AIza…" autocomplete="off">
       <p class="muted" style="font-size:12.5px;margin-top:6px">
-        🔒 Stored in <b>this browser only</b> — it is sent with each search but never saved on our servers.
+        ${ic('lock')} Stored in <b>this browser only</b> — it is sent with each search but never saved on our servers.
         Clearing your browser data removes it.
       </p>
       <div class="banner banner-info" style="margin-top:10px;font-size:12.5px;line-height:1.6">
-        💡 <b>What it costs you:</b> Google bills you directly — never us.
+        ${ic('bulb')} <b>What it costs you:</b> Google bills you directly — never us.
         <b>New to Google Cloud?</b> You start with a one-time free trial (currently <b>$300 in credit over 90 days</b>), so your first months cost nothing.
         After that, Google still includes a <b>free monthly usage allowance</b> that renews each month — the usage counter below resets on the 1st and shows where you stand. Beyond the free tier you pay Google directly, typically only in heavy months.
       </div>
@@ -2331,7 +2467,7 @@ async function viewSettings() {
     ${usageCard()}
 
     <div class="card mb">
-      <h2 style="margin-top:0">🗄️ Supabase sync <span class="badge badge-muted">optional</span></h2>
+      <h2 style="margin-top:0">${ic('database')} Supabase sync <span class="badge badge-muted">optional</span></h2>
       <p class="muted" style="font-size:13.5px">Leads live in this browser until you connect Supabase (then they sync across devices). Run <code class="inline">schema.sql</code> in your Supabase SQL editor first.</p>
       <div class="grid" style="grid-template-columns:1fr 1fr">
         <div><label>Project URL</label><input id="s-surl" value="${esc(s.supabaseUrl || '')}" placeholder="https://xxxx.supabase.co"></div>
@@ -2368,7 +2504,7 @@ async function viewSettings() {
     saveSettings({ supabaseUrl: $('#s-surl').value.trim(), supabaseKey: $('#s-skey').value.trim() });
     const ok = await initSupabase();
     updateStorageBadge(ok);
-    toast(ok ? '✅ Supabase connected' : '❌ Could not connect — check URL/key and that schema.sql was run');
+    toast(ok ? 'Supabase connected' : 'Could not connect — check URL/key and that schema.sql was run');
   };
   const usageReset = $('#s-usage-reset');
   if (usageReset) usageReset.onclick = () => {
