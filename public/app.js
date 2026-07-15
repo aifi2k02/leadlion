@@ -105,7 +105,11 @@ function isTrial() { return SESSION?.profile?.type === 'trial'; }
 // keys in KV, one breach would leak every customer's billable Google credential.
 // When present, their searches bill their Google account, not ours.
 function byokKey() { return (getSettings().googleApiKey || '').trim() || undefined; }
-function hasByok() { return !!byokKey(); }
+// Mirror the server's shape check (isPlausibleGoogleKey). A key that fails this is
+// IGNORED server-side and searches silently fall back to OUR key — so treat it as
+// "not connected" here too, or the badge/banner would promise BYOK we won't honour.
+function looksLikeGoogleKey(k) { return /^AIza[0-9A-Za-z_\-]{20,60}$/.test((k || '').trim()); }
+function hasByok() { return looksLikeGoogleKey(byokKey()); }
 
 // Every request that spends a Google API call goes through this.
 function spendBody(extra) {
@@ -2507,10 +2511,14 @@ async function viewSettings() {
         and we stop counting your API credits.
       </p>
       <label>Google API key</label>
-      <input id="s-gkey" type="password" value="${esc(s.googleApiKey || '')}" placeholder="AIza…" autocomplete="off">
+      <div class="flex" style="gap:8px;align-items:stretch">
+        <input id="s-gkey" type="password" value="${esc(s.googleApiKey || '')}" placeholder="AIza…" autocomplete="off" style="flex:1">
+        <button class="btn-ghost" id="s-test-key" type="button" style="white-space:nowrap">Test key</button>
+      </div>
+      <div id="s-key-result" style="margin-top:8px"></div>
       <p class="muted" style="font-size:12.5px;margin-top:6px">
         ${ic('lock')} Stored in <b>this browser only</b> — it is sent with each search but never saved on our servers.
-        Clearing your browser data removes it.
+        Clearing your browser data removes it. <b>Test key</b> runs one live search on your key to confirm it works.
       </p>
       <div class="banner banner-info" style="margin-top:10px;font-size:12.5px;line-height:1.6">
         ${ic('bulb')} <b>What it costs you:</b> Google bills you directly — never us.
@@ -2572,6 +2580,29 @@ async function viewSettings() {
     const ok = await initSupabase();
     updateStorageBadge(ok);
     toast(ok ? 'Supabase connected' : 'Could not connect — check URL/key and that schema.sql was run');
+  };
+  $('#s-test-key').onclick = async () => {
+    const key = $('#s-gkey').value.trim();
+    const box = $('#s-key-result');
+    const btn = $('#s-test-key');
+    const prev = btn.textContent;
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner"></span> Testing…`;
+    box.innerHTML = '';
+    try {
+      const res = await fetch('/api/testkey', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ googleKey: key }) });
+      const d = await res.json();
+      const cls = d.status === 'ok' ? 'banner-info' : 'banner-warn';
+      const icon = d.status === 'ok' ? ic('checkCircle', 'ic-ok')
+        : d.status === 'invalid-format' || d.status === 'empty' ? ic('alertTriangle', 'ic-warning')
+        : sevIcon('critical');
+      box.innerHTML = `<div class="banner ${cls}" style="font-size:12.5px;line-height:1.6">${icon} ${esc(d.message || 'Unknown result.')}</div>`;
+    } catch (e) {
+      box.innerHTML = `<div class="banner banner-warn" style="font-size:12.5px">Test failed: ${esc(e.message)}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = prev;
+    }
   };
   const usageReset = $('#s-usage-reset');
   if (usageReset) usageReset.onclick = () => {
