@@ -2026,22 +2026,28 @@ function openReplyModal(lead, selected = 0, tone = REPLY_TONES[0]) {
 
 // -------- my leads (pipeline)
 let leadsView = 'board'; // 'board' | 'list'
-let leadsFilter = { location: '', keyword: '' }; // My Leads segment filter
+let leadsFilter = { location: '', niche: '' }; // My Leads segment filter
+
+// Niche = Google's real business category, NOT the raw search term. A search for a
+// business name ("Dear You") would otherwise pollute the niche list with a name;
+// its category ("Cafe") is the true niche. Fall back to the search term only if a
+// lead has no category.
+const nicheOf = (l) => l.category || l.keyword || 'Uncategorised';
 
 async function viewLeads() {
   const allLeads = await store.list();
   // Segment the pipeline by location + niche — an agency running many cities/niches
   // accumulates hundreds of leads here; the filter makes that pile usable.
   const locations = [...new Set(allLeads.map((l) => l.location).filter(Boolean))].sort();
-  const niches = [...new Set(allLeads.map((l) => l.keyword).filter(Boolean))].sort();
+  const niches = [...new Set(allLeads.map(nicheOf))].sort();
   const leads = allLeads.filter((l) =>
     (!leadsFilter.location || l.location === leadsFilter.location) &&
-    (!leadsFilter.keyword || l.keyword === leadsFilter.keyword));
+    (!leadsFilter.niche || nicheOf(l) === leadsFilter.niche));
   const showFilters = allLeads.length && (locations.length > 1 || niches.length > 1);
-  const filtered = leadsFilter.location || leadsFilter.keyword;
+  const filtered = leadsFilter.location || leadsFilter.niche;
   const filterBar = showFilters ? `
     <div class="filter-bar" style="margin:16px 0 6px">
-      ${niches.length > 1 ? `<select id="flt-niche" class="flt"><option value="">All niches</option>${niches.map((k) => `<option value="${esc(k)}" ${leadsFilter.keyword === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>` : ''}
+      ${niches.length > 1 ? `<select id="flt-niche" class="flt"><option value="">All niches</option>${niches.map((k) => `<option value="${esc(k)}" ${leadsFilter.niche === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>` : ''}
       ${locations.length > 1 ? `<select id="flt-loc" class="flt"><option value="">All locations</option>${locations.map((l) => `<option value="${esc(l)}" ${leadsFilter.location === l ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>` : ''}
       <span class="muted" style="font-size:12.5px">${leads.length} of ${allLeads.length} leads</span>
       ${filtered ? `<button class="btn-ghost btn-sm" id="flt-clear">Clear</button>` : ''}
@@ -2080,9 +2086,9 @@ async function viewLeads() {
   document.querySelectorAll('.seg-btn').forEach((b) => {
     b.onclick = () => { leadsView = b.dataset.view; viewLeads(); };
   });
-  if ($('#flt-niche')) $('#flt-niche').onchange = (e) => { leadsFilter.keyword = e.target.value; viewLeads(); };
+  if ($('#flt-niche')) $('#flt-niche').onchange = (e) => { leadsFilter.niche = e.target.value; viewLeads(); };
   if ($('#flt-loc')) $('#flt-loc').onchange = (e) => { leadsFilter.location = e.target.value; viewLeads(); };
-  const clearFilter = () => { leadsFilter = { location: '', keyword: '' }; viewLeads(); };
+  const clearFilter = () => { leadsFilter = { location: '', niche: '' }; viewLeads(); };
   if ($('#flt-clear')) $('#flt-clear').onclick = clearFilter;
   if ($('#flt-clear-empty')) $('#flt-clear-empty').onclick = clearFilter;
   document.querySelectorAll('.lead-card').forEach((c) => {
