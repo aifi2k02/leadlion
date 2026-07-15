@@ -1830,6 +1830,9 @@ async function openLeadModal(lead) {
       fb.classList.add('show');
       toast(`Moved to ${STATUS_LABEL[e.target.value]}`);
       setTimeout(() => fb.classList.remove('show'), 2500);
+      // Keep the board/list behind the modal in sync (modal lives in #modal-root,
+      // so re-rendering #main via viewLeads doesn't close it). Matches drag-drop.
+      if (location.hash.includes('/leads')) viewLeads();
     };
     $('#lead-notes').onblur = async (e) => {
       l.notes = e.target.value;
