@@ -19,7 +19,6 @@ export const FIELD_MASK = [
   'places.regularOpeningHours',
   'places.googleMapsUri',
   'places.primaryTypeDisplayName',
-  'places.editorialSummary',
   'places.location',
   'nextPageToken',
 ].join(',');
@@ -55,7 +54,6 @@ export function mapPlace(p) {
     // Places API doesn't expose claimed status; heuristic: no website, no
     // hours and <3 photos usually means an auto-generated unclaimed listing.
     claimed: !(!p.websiteUri && !p.regularOpeningHours && (p.photos || []).length < 3),
-    description: p.editorialSummary?.text || null,
     businessStatus: p.businessStatus || 'OPERATIONAL',
     mapsUrl: p.googleMapsUri || null,
     lat: p.location?.latitude ?? null,

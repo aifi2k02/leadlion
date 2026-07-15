@@ -173,12 +173,12 @@ export function renderReportPage(d) {
     </div>` : ''}
 
     ${d.competitors && d.competitors.marketSize ? `<div class="section"><h2>${rico('barChart')} Competitor Benchmark</h2>
-      <p style="color:#4a5568;font-size:14px">Ranked <b>#${d.competitors.rankByReviews}</b> of ${d.competitors.marketSize} by review volume for "${esc(d.keyword || '')}" in ${esc(d.location || '')}. Compared to the top ${d.competitors.topN} competitors:</p>
+      <p style="color:#4a5568;font-size:14px">Ranked <b>#${d.competitors.rankByReviews}</b> of ${d.competitors.marketSize} by review volume for "${esc(d.keyword || '')}" in ${esc(d.location || '')}. Compared to the typical competitor:</p>
       <div class="meta" style="margin-top:10px">
-        <span class="k">Reviews</span><span>${d.reviewCount ?? 0} <span style="color:#718096">vs ${d.competitors.avgReviews} avg${(d.reviewCount || 0) < d.competitors.avgReviews ? ` (${d.competitors.avgReviews - (d.reviewCount || 0)} behind)` : ''}</span></span>
-        <span class="k">Rating</span><span>${d.rating || 0}★ <span style="color:#718096">vs ${d.competitors.avgRating}★ avg</span></span>
-        <span class="k">Photos</span><span>${d.photoCount ?? 0} <span style="color:#718096">vs ${d.competitors.avgPhotos} avg</span></span>
-        <span class="k">Website</span><span>${d.website ? 'Yes' : 'No'} <span style="color:#718096">· ${d.competitors.pctWebsite}% of top ${d.competitors.topN} have one</span></span>
+        <span class="k">Reviews</span><span>${d.reviewCount ?? 0} <span style="color:#718096">vs ${d.competitors.medReviews} typical${(d.reviewCount || 0) < d.competitors.medReviews ? ` (${d.competitors.medReviews - (d.reviewCount || 0)} behind)` : ''}</span></span>
+        <span class="k">Rating</span><span>${d.rating || 0}★ <span style="color:#718096">vs ${d.competitors.medRating}★ typical</span></span>
+        <span class="k">Photos</span><span>${d.photoCount ?? 0} <span style="color:#718096">vs ${d.competitors.medPhotos} typical</span></span>
+        <span class="k">Website</span><span>${d.website ? 'Yes' : 'No'} <span style="color:#718096">· ${d.competitors.pctWebsite}% of competitors have one</span></span>
       </div>
     </div>` : ''}
 

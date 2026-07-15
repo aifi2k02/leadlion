@@ -284,6 +284,7 @@ td .sub { color: var(--text-dim); font-size: 12.5px; }
 
 /* ---------- Filters ---------- */
 .filter-bar { display: flex; gap: 8px; margin: 16px 0 12px; flex-wrap: wrap; align-items: center; }
+.filter-bar select.flt { width: auto; min-width: 150px; max-width: 260px; padding: 7px 11px; font-size: 13px; }
 .chip {
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -301,19 +302,24 @@ td .sub { color: var(--text-dim); font-size: 12.5px; }
 
 /* ---------- Pipeline ---------- */
 .pipeline { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; align-items: start; }
-.pipe-col { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; }
+.pipe-col { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; transition: border-color 0.16s var(--ease), background 0.16s var(--ease); }
 .pipe-col h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); padding: 4px 6px 10px; }
+/* Drop zone — min-height so an empty column is still a valid drag target. */
+.pipe-drop { min-height: 44px; }
+.pipe-col.drag-over { border-color: var(--accent); background: var(--accent-soft); }
 .lead-card {
   background: var(--bg-card);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   padding: 11px 13px;
   margin-bottom: 8px;
-  cursor: pointer;
+  cursor: grab;
   font-size: 13.5px;
-  transition: border-color 0.16s var(--ease), transform 0.16s var(--ease), box-shadow 0.16s var(--ease);
+  transition: border-color 0.16s var(--ease), transform 0.16s var(--ease), box-shadow 0.16s var(--ease), opacity 0.16s var(--ease);
 }
 .lead-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.lead-card:active { cursor: grabbing; }
+.lead-card.dragging { opacity: 0.4; cursor: grabbing; }
 .lead-card .name { font-weight: 600; margin-bottom: 2px; }
 .lead-card .meta { color: var(--text-dim); font-size: 12px; display: flex; justify-content: space-between; }
 

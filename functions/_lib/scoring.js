@@ -105,12 +105,16 @@ const FACTORS = [
   {
     key: 'photos',
     label: 'Photos',
-    max: 10,
+    // 15 pts: absorbed the old 'description' factor's weight (that factor scored
+    // Google's editorialSummary, which local businesses ~never have and the API
+    // won't expose the owner-written description — so it was a false 0/5 for
+    // everyone). Photos is a real, verifiable listing-richness signal instead.
+    max: 15,
     score: (b) => {
       const n = b.photoCount || 0;
-      if (n >= 10) return 10;
-      if (n >= 5) return 7;
-      if (n >= 1) return 4;
+      if (n >= 10) return 15;
+      if (n >= 5) return 10;
+      if (n >= 1) return 5;
       return 0;
     },
     finding: (b) => {
@@ -154,22 +158,6 @@ const FACTORS = [
             severity: 'critical',
             text: 'No phone number on the listing.',
             pitch: 'Mobile searchers can’t tap-to-call — that’s lost revenue every single day.',
-            service: 'GMB optimization',
-          },
-  },
-  {
-    key: 'description',
-    label: 'Business description',
-    max: 5,
-    score: (b) => (b.description ? 5 : 0),
-    finding: (b) =>
-      b.description
-        ? { ok: true, text: 'Business description present.' }
-        : {
-            ok: false,
-            severity: 'info',
-            text: 'No business description / editorial summary.',
-            pitch: 'A keyword-rich description helps the listing rank for more searches.',
             service: 'GMB optimization',
           },
   },

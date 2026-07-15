@@ -307,8 +307,8 @@ function buildOutreach(lead) {
   const services = [...new Set([...(lead.services || []), ...(lead.webAudit?.issues || []).map((i) => i.service)])].filter(Boolean).join(', ') || 'local SEO';
 
   const c = lead.competitors;
-  const compLine = c && c.marketSize && (lead.reviewCount || 0) < c.avgReviews
-    ? `\n\nFor context: you're currently ranked #${c.rankByReviews} of ${c.marketSize} for "${lead.keyword}" in your area — the top ${c.topN} businesses average ${c.avgReviews} reviews, while you have ${lead.reviewCount || 0}. That gap is closable.`
+  const compLine = c && c.marketSize && (lead.reviewCount || 0) < c.medReviews
+    ? `\n\nFor context: you're currently ranked #${c.rankByReviews} of ${c.marketSize} for "${lead.keyword}" in your area — the typical business there has ${c.medReviews} reviews, while you have ${lead.reviewCount || 0}. That gap is closable.`
     : '';
 
   // Review intelligence line — only when it actually strengthens the pitch.
@@ -858,16 +858,21 @@ function attachCompetitorStats(results) {
   if (!n) return;
   const byReviews = [...results].sort((a, b) => (b.reviewCount || 0) - (a.reviewCount || 0));
   const rank = new Map(byReviews.map((r, i) => [r.placeId, i + 1]));
-  const topN = Math.min(5, n);
-  const top = byReviews.slice(0, topN);
-  const avg = (f) => Math.round(top.reduce((s, x) => s + (f(x) || 0), 0) / topN);
+  // Median over the WHOLE market — NOT a mean of the top-5. One national chain
+  // (e.g. 16,000 reviews) makes a top-5 mean wildly unrepresentative: telling a
+  // local shop it's "5,982 behind" reads as naive and kills the pitch. The median
+  // is the honest "typical competitor" and is robust to those outliers.
+  const median = (f) => {
+    const xs = results.map((x) => f(x) || 0).sort((a, b) => a - b);
+    const m = xs.length >> 1;
+    return xs.length % 2 ? xs[m] : (xs[m - 1] + xs[m]) / 2;
+  };
   const bench = {
     marketSize: n,
-    topN,
-    avgReviews: avg((x) => x.reviewCount),
-    avgRating: Math.round((top.reduce((s, x) => s + (x.rating || 0), 0) / topN) * 10) / 10,
-    avgPhotos: avg((x) => x.photoCount),
-    pctWebsite: Math.round((top.filter((x) => x.website).length / topN) * 100),
+    medReviews: Math.round(median((x) => x.reviewCount)),
+    medRating: Math.round(median((x) => x.rating) * 10) / 10,
+    medPhotos: Math.round(median((x) => x.photoCount)),
+    pctWebsite: Math.round((results.filter((x) => x.website).length / n) * 100),
   };
   for (const r of results) r.competitors = { ...bench, rankByReviews: rank.get(r.placeId) };
 }
@@ -1245,20 +1250,20 @@ function miningBlock(l) {
 function competitorBlock(l) {
   const c = l.competitors;
   if (!c || !c.marketSize) return '';
-  const cmp = (label, you, avg, higherIsBetter = true) => {
-    const behind = higherIsBetter ? (you || 0) < avg : (you || 0) > avg;
+  const cmp = (label, you, typical, higherIsBetter = true) => {
+    const behind = higherIsBetter ? (you || 0) < typical : (you || 0) > typical;
     return `<div class="finding"><span class="icon">${behind ? sevIcon('critical') : sevIcon('ok')}</span>
       <div class="flex spread" style="flex:1"><span>${label}</span>
-      <span><b>${you ?? 0}</b> <span class="muted">vs ${avg} avg${behind ? ` · ${+Math.abs(avg - (you || 0)).toFixed(1)} behind` : ''}</span></span></div></div>`;
+      <span><b>${you ?? 0}</b> <span class="muted">vs ${typical} typical${behind ? ` · ${+Math.abs(typical - (you || 0)).toFixed(1)} behind` : ''}</span></span></div></div>`;
   };
   return `
     <h2 style="font-size:15px">Competitor benchmark</h2>
-    <p class="muted" style="font-size:13px">Ranked <b style="color:var(--accent)">#${c.rankByReviews}</b> of ${c.marketSize} by review volume for "${esc(l.keyword)}" in ${esc(l.location)} — vs the top ${c.topN} competitors:</p>
+    <p class="muted" style="font-size:13px">Ranked <b style="color:var(--accent)">#${c.rankByReviews}</b> of ${c.marketSize} by review volume for "${esc(l.keyword)}" in ${esc(l.location)} — vs the typical competitor:</p>
     <div class="mb">
-      ${cmp('Reviews', l.reviewCount, c.avgReviews)}
-      ${cmp('Rating', l.rating, c.avgRating)}
-      ${cmp('Photos', l.photoCount, c.avgPhotos)}
-      <div class="finding"><span class="icon">${l.website ? sevIcon('ok') : sevIcon('critical')}</span><div class="flex spread" style="flex:1"><span>Website</span><span><b>${l.website ? 'Yes' : 'No'}</b> <span class="muted">· ${c.pctWebsite}% of top ${c.topN} have one</span></span></div></div>
+      ${cmp('Reviews', l.reviewCount, c.medReviews)}
+      ${cmp('Rating', l.rating, c.medRating)}
+      ${cmp('Photos', l.photoCount, c.medPhotos)}
+      <div class="finding"><span class="icon">${l.website ? sevIcon('ok') : sevIcon('critical')}</span><div class="flex spread" style="flex:1"><span>Website</span><span><b>${l.website ? 'Yes' : 'No'}</b> <span class="muted">· ${c.pctWebsite}% of competitors have one</span></span></div></div>
     </div>`;
 }
 
@@ -2018,33 +2023,53 @@ function openReplyModal(lead, selected = 0, tone = REPLY_TONES[0]) {
 
 // -------- my leads (pipeline)
 let leadsView = 'board'; // 'board' | 'list'
+let leadsFilter = { location: '', keyword: '' }; // My Leads segment filter
 
 async function viewLeads() {
-  const leads = await store.list();
+  const allLeads = await store.list();
+  // Segment the pipeline by location + niche — an agency running many cities/niches
+  // accumulates hundreds of leads here; the filter makes that pile usable.
+  const locations = [...new Set(allLeads.map((l) => l.location).filter(Boolean))].sort();
+  const niches = [...new Set(allLeads.map((l) => l.keyword).filter(Boolean))].sort();
+  const leads = allLeads.filter((l) =>
+    (!leadsFilter.location || l.location === leadsFilter.location) &&
+    (!leadsFilter.keyword || l.keyword === leadsFilter.keyword));
+  const showFilters = allLeads.length && (locations.length > 1 || niches.length > 1);
+  const filtered = leadsFilter.location || leadsFilter.keyword;
+  const filterBar = showFilters ? `
+    <div class="filter-bar" style="margin:16px 0 6px">
+      ${niches.length > 1 ? `<select id="flt-niche" class="flt"><option value="">All niches</option>${niches.map((k) => `<option value="${esc(k)}" ${leadsFilter.keyword === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>` : ''}
+      ${locations.length > 1 ? `<select id="flt-loc" class="flt"><option value="">All locations</option>${locations.map((l) => `<option value="${esc(l)}" ${leadsFilter.location === l ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>` : ''}
+      <span class="muted" style="font-size:12.5px">${leads.length} of ${allLeads.length} leads</span>
+      ${filtered ? `<button class="btn-ghost btn-sm" id="flt-clear">Clear</button>` : ''}
+    </div>` : '';
   $('#main').innerHTML = `
     <div class="flex spread">
       <div><h1>My Leads</h1><p class="subtitle">${leadsView === 'board' ? 'Open a lead to move it through your pipeline.' : 'Select leads to delete in bulk, or open one to manage it.'}</p></div>
       <div class="flex no-print">
-        ${leads.length ? `<div class="seg">
+        ${allLeads.length ? `<div class="seg">
           <button class="seg-btn ${leadsView === 'board' ? 'on' : ''}" data-view="board">▦ Board</button>
           <button class="seg-btn ${leadsView === 'list' ? 'on' : ''}" data-view="list">☰ List</button>
         </div>` : ''}
         ${feat().download ? `<button class="btn-ghost btn-sm" id="csv-all" ${leads.length ? '' : 'disabled'}>${ic('download')} Export CSV</button>` : ''}
       </div>
     </div>
-    ${leads.length === 0
+    ${filterBar}
+    ${allLeads.length === 0
       ? `<div class="card muted">No saved leads yet. <a href="#/find" style="color:var(--accent)">Find some →</a></div>`
+      : leads.length === 0
+      ? `<div class="card muted">No leads match this filter. <a id="flt-clear-empty" style="color:var(--accent);cursor:pointer">Clear filter</a></div>`
       : leadsView === 'list'
         ? `${bulkBarHtml()}<div class="table-wrap">${leadsTable(leads, { selectable: true })}</div>`
         : `<div class="pipeline">
           ${STATUSES.map((st) => {
             const col = leads.filter((l) => (l.status || 'new') === st);
-            return `<div class="pipe-col"><h3>${STATUS_LABEL[st]} · ${col.length}</h3>
-              ${col.map((l) => `
-                <div class="lead-card" data-id="${esc(l.id)}">
+            return `<div class="pipe-col" data-status="${st}"><h3>${STATUS_LABEL[st]} · <span class="pipe-count">${col.length}</span></h3>
+              <div class="pipe-drop">${col.map((l) => `
+                <div class="lead-card" draggable="true" data-id="${esc(l.id)}">
                   <div class="name">${esc(l.name)}${l.demoSiteId ? ` <span title="Demo website published">${ic('globe')}</span>` : ''}</div>
                   <div class="meta"><span>${esc(l.keyword || '')}</span>${scorePill(l.opportunityScore)}</div>
-                </div>`).join('')}
+                </div>`).join('')}</div>
             </div>`;
           }).join('')}
         </div>`}
@@ -2052,12 +2077,45 @@ async function viewLeads() {
   document.querySelectorAll('.seg-btn').forEach((b) => {
     b.onclick = () => { leadsView = b.dataset.view; viewLeads(); };
   });
+  if ($('#flt-niche')) $('#flt-niche').onchange = (e) => { leadsFilter.keyword = e.target.value; viewLeads(); };
+  if ($('#flt-loc')) $('#flt-loc').onchange = (e) => { leadsFilter.location = e.target.value; viewLeads(); };
+  const clearFilter = () => { leadsFilter = { location: '', keyword: '' }; viewLeads(); };
+  if ($('#flt-clear')) $('#flt-clear').onclick = clearFilter;
+  if ($('#flt-clear-empty')) $('#flt-clear-empty').onclick = clearFilter;
   document.querySelectorAll('.lead-card').forEach((c) => {
     c.onclick = async () => openLeadModal(await store.get(c.dataset.id));
+    // Kanban drag: a drag does NOT fire click, so open-on-click still works.
+    c.ondragstart = (e) => {
+      e.dataTransfer.setData('text/plain', c.dataset.id);
+      e.dataTransfer.effectAllowed = 'move';
+      c.classList.add('dragging');
+    };
+    c.ondragend = () => c.classList.remove('dragging');
   });
+  if (leadsView === 'board') wireBoardDrop();
   if (leadsView === 'list') { bindLeadRows(leads); wireSelection(viewLeads); }
   const csvBtn = $('#csv-all');
   if (csvBtn) csvBtn.onclick = () => exportCsv(leads, 'leadlion-pipeline');
+}
+
+// Kanban drop targets: each column accepts a dragged card and re-stages the lead.
+function wireBoardDrop() {
+  document.querySelectorAll('.pipe-col').forEach((col) => {
+    const status = col.dataset.status;
+    col.ondragover = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; col.classList.add('drag-over'); };
+    col.ondragleave = (e) => { if (!col.contains(e.relatedTarget)) col.classList.remove('drag-over'); };
+    col.ondrop = async (e) => {
+      e.preventDefault();
+      col.classList.remove('drag-over');
+      const id = e.dataTransfer.getData('text/plain');
+      if (!id) return;
+      const lead = await store.get(id);
+      if (!lead || (lead.status || 'new') === status) return; // no-op if same column
+      await store.update(id, { status });
+      toast(`Moved to ${STATUS_LABEL[status]}`);
+      viewLeads();
+    };
+  });
 }
 
 // -------- map (saved leads plotted; Leaflet lazy-loaded)
@@ -2228,12 +2286,12 @@ async function viewReport(id) {
       ${lead.competitors?.marketSize ? `
       <div class="report-section">
         <h2>${ic('barChart')} Competitor Benchmark</h2>
-        <p style="color:#4a5568;font-size:14px">Ranked <b>#${lead.competitors.rankByReviews}</b> of ${lead.competitors.marketSize} by review volume for "${esc(lead.keyword)}" in ${esc(lead.location)}. Here's how you compare to the top ${lead.competitors.topN} competitors:</p>
+        <p style="color:#4a5568;font-size:14px">Ranked <b>#${lead.competitors.rankByReviews}</b> of ${lead.competitors.marketSize} by review volume for "${esc(lead.keyword)}" in ${esc(lead.location)}. Here's how you compare to the typical competitor:</p>
         <div class="report-meta-grid" style="margin-top:10px">
-          <span class="k">Reviews</span><span>${lead.reviewCount ?? 0} <span style="color:#718096">vs ${lead.competitors.avgReviews} avg${(lead.reviewCount || 0) < lead.competitors.avgReviews ? ` (${lead.competitors.avgReviews - (lead.reviewCount || 0)} behind)` : ''}</span></span>
-          <span class="k">Rating</span><span>${lead.rating || 0}★ <span style="color:#718096">vs ${lead.competitors.avgRating}★ avg</span></span>
-          <span class="k">Photos</span><span>${lead.photoCount ?? 0} <span style="color:#718096">vs ${lead.competitors.avgPhotos} avg</span></span>
-          <span class="k">Website</span><span>${lead.website ? 'Yes' : 'No'} <span style="color:#718096">· ${lead.competitors.pctWebsite}% of top ${lead.competitors.topN} have one</span></span>
+          <span class="k">Reviews</span><span>${lead.reviewCount ?? 0} <span style="color:#718096">vs ${lead.competitors.medReviews} typical${(lead.reviewCount || 0) < lead.competitors.medReviews ? ` (${lead.competitors.medReviews - (lead.reviewCount || 0)} behind)` : ''}</span></span>
+          <span class="k">Rating</span><span>${lead.rating || 0}★ <span style="color:#718096">vs ${lead.competitors.medRating}★ typical</span></span>
+          <span class="k">Photos</span><span>${lead.photoCount ?? 0} <span style="color:#718096">vs ${lead.competitors.medPhotos} typical</span></span>
+          <span class="k">Website</span><span>${lead.website ? 'Yes' : 'No'} <span style="color:#718096">· ${lead.competitors.pctWebsite}% of competitors have one</span></span>
         </div>
       </div>` : ''}
 
