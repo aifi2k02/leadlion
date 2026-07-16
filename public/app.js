@@ -2509,6 +2509,7 @@ async function viewSettings() {
       <p class="muted" style="font-size:13.5px">
         Add your own key and your searches become <b>unlimited</b> — they bill your Google account directly, not ours,
         and we stop counting your API credits.
+        <a href="/byok" target="_blank" rel="noopener" style="color:var(--accent)">What is BYOK, and why? ↗</a>
       </p>
       <label>Google API key</label>
       <div class="flex" style="gap:8px;align-items:stretch">

@@ -1,7 +1,7 @@
 // LeadLion service worker — caches the app shell for instant loads / offline.
 // Network-first for HTML/API so data stays fresh; cache-first for static assets.
 
-const CACHE = 'leadlion-v55';
+const CACHE = 'leadlion-v56';
 const SHELL = ['/app', '/app.html', '/app.js', '/styles.css', '/logo.png', '/manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
@@ -26,6 +26,7 @@ self.addEventListener('fetch', (e) => {
     url.pathname.startsWith('/r/') ||
     url.pathname === '/admin' || url.pathname === '/admin.html' ||
     url.pathname === '/privacy' || url.pathname === '/terms' ||
+    url.pathname === '/byok' || url.pathname === '/byok.html' ||
     url.pathname === '/' || url.pathname === '/index.html'
   ) return;
 
