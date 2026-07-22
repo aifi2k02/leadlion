@@ -1001,6 +1001,12 @@ async function runSearch() {
   const location = $('#loc').value.trim();
   if (!keyword || !location) return toast('Enter both a keyword and a location');
   const depth = feat().deep ? ($('#depth')?.value || 'quick') : 'fast';
+  // Exhaustive is the single most expensive action in the app (hundreds–1,000+
+  // Google calls). It's the only search that gets a spend warning up front —
+  // the city size isn't known until /api/plan, so the range is deliberately broad.
+  if (depth === 'exhaustive' && !confirm(
+    'Exhaustive scan visits every zone in the city and can fire hundreds — 1,000+ on a large metro — Google API calls (roughly $10–$30 est. at our rate). It finds the most leads, and is the most expensive search.\n\nRun the exhaustive scan?'
+  )) return;
   const btn = $('#go');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span>';
