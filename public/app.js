@@ -111,6 +111,16 @@ function byokKey() { return (getSettings().googleApiKey || '').trim() || undefin
 function looksLikeGoogleKey(k) { return /^AIza[0-9A-Za-z_\-]{20,60}$/.test((k || '').trim()); }
 function hasByok() { return looksLikeGoogleKey(byokKey()); }
 
+// First-run BYOK nudge — shown once, then never again whether they set a key or
+// chose to explore first. Dismissing is a real answer, so we record it either way.
+const BYOK_PROMPTED_KEY = 'leadlion_byok_prompted';
+function byokPrompted() { return localStorage.getItem(BYOK_PROMPTED_KEY) === '1'; }
+function markByokPrompted() { localStorage.setItem(BYOK_PROMPTED_KEY, '1'); }
+
+const SUPA_PROMPTED_KEY = 'leadlion_supa_prompted';
+function supaPrompted() { return localStorage.getItem(SUPA_PROMPTED_KEY) === '1'; }
+function markSupaPrompted() { localStorage.setItem(SUPA_PROMPTED_KEY, '1'); }
+
 // Every request that spends a Google API call goes through this.
 function spendBody(extra) {
   return JSON.stringify({ ...extra, code: accessCode(), googleKey: byokKey() });
@@ -130,22 +140,97 @@ function dbActive() { return !!supabase && SESSION?.profile?.type === 'full'; }
 // Same interface for localStorage and Supabase so views don't care which.
 const LEADS_KEY = 'leadlion_leads';
 let supabase = null;
+// Set only when Supabase is CONFIGURED BUT BROKEN. "Not configured" and "broken"
+// both used to collapse into a quiet localStorage fallback, which is the same trap
+// as the BYOK badge: the user believes their leads are synced when they aren't.
+// Broken must be loud — see updateStorageBadge() + injectStorageWarning().
+let supaError = null;
 
 async function initSupabase() {
   const s = getSettings();
-  if (!s.supabaseUrl || !s.supabaseKey) return false;
+  supabase = null;
+  supaError = null;
+  if (!s.supabaseUrl || !s.supabaseKey) return false; // not configured — not an error
   try {
     const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
     supabase = createClient(s.supabaseUrl, s.supabaseKey);
-    // probe the table so we fail fast and fall back to local
+    // probe the table so we fail fast rather than at the first save
     const { error } = await supabase.from('leads').select('id').limit(1);
     if (error) throw new Error(error.message);
     return true;
   } catch (e) {
     supabase = null;
+    supaError = e.message || 'Connection failed';
     console.warn('Supabase unavailable, using local storage:', e.message);
     return false;
   }
+}
+
+// Connecting Supabase flips store.list() to read ONLY the remote table, so any
+// leads already saved in this browser would silently vanish from the UI (they're
+// still in localStorage, but nothing reads it any more). Offer to lift them up.
+// Upsert by id so re-running is harmless, and NEVER delete the local copy — it
+// stays as a free backup.
+const MIGRATED_KEY = 'leadlion_supa_migrated';
+
+async function maybeOfferLeadMigration() {
+  if (!dbActive()) return;
+  const local = store.local();
+  if (!local.length || localStorage.getItem(MIGRATED_KEY) === '1') return;
+  let remoteIds = new Set();
+  try {
+    const { data, error } = await supabase.from('leads').select('id');
+    if (error) throw new Error(error.message);
+    remoteIds = new Set((data || []).map((r) => r.id));
+  } catch { /* can't read — still offer, upsert is idempotent */ }
+  const missing = local.filter((l) => !remoteIds.has(l.id));
+  if (!missing.length) { localStorage.setItem(MIGRATED_KEY, '1'); return; }
+
+  $('#modal-root').innerHTML = `
+    <div class="modal-overlay" id="mig-overlay">
+      <div class="modal" style="max-width:540px">
+        <h2 style="margin-top:0">${ic('database')} Move your saved leads to Supabase?</h2>
+        <p class="muted" style="font-size:14px;line-height:1.65">
+          You have <b>${missing.length} lead${missing.length === 1 ? '' : 's'}</b> saved in this browser.
+          Now that Supabase is connected, the app reads leads from there — so these
+          <b>won't show up until they're uploaded</b>.
+        </p>
+        <div class="banner banner-info" style="font-size:12.5px;line-height:1.6;margin-top:12px">
+          ${ic('lock')} Nothing is deleted. Your browser copy stays exactly where it is as a backup, and uploading twice is harmless.
+        </div>
+        <div id="mig-result" style="margin-top:10px"></div>
+        <div class="flex mt" style="margin-top:20px">
+          <button id="mig-go">${ic('upload')} Upload ${missing.length} lead${missing.length === 1 ? '' : 's'}</button>
+          <button class="btn-ghost" id="mig-skip">Not now</button>
+        </div>
+      </div>
+    </div>`;
+  const close = () => { $('#modal-root').innerHTML = ''; };
+  $('#mig-skip').onclick = () => { localStorage.setItem(MIGRATED_KEY, '1'); close(); toast('Skipped — your leads stay in this browser'); };
+  $('#mig-overlay').onclick = (e) => { if (e.target.id === 'mig-overlay') close(); };
+  $('#mig-go').onclick = async () => {
+    const btn = $('#mig-go');
+    btn.disabled = true;
+    const rows = missing.map((l) => ({ id: l.id, status: l.status || 'new', notes: l.notes || '', data: l }));
+    let done = 0, failed = 0;
+    const CHUNK = 50; // one round-trip per 50 — 244 single upserts would crawl
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const slice = rows.slice(i, i + CHUNK);
+      btn.innerHTML = `<span class="spinner"></span> ${done}/${rows.length}`;
+      const { error } = await supabase.from('leads').upsert(slice);
+      if (error) { failed += slice.length; } else { done += slice.length; }
+    }
+    if (failed) {
+      $('#mig-result').innerHTML = `<div class="banner banner-warn" style="font-size:12.5px">${sevIcon('critical')} ${done} uploaded, <b>${failed} failed</b>. Your browser copy is untouched — fix the error and try again.</div>`;
+      btn.disabled = false;
+      btn.innerHTML = `${ic('upload')} Retry`;
+      return;
+    }
+    localStorage.setItem(MIGRATED_KEY, '1');
+    close();
+    toast(`${done} lead${done === 1 ? '' : 's'} moved to Supabase`);
+    render();
+  };
 }
 
 const store = {
@@ -303,6 +388,106 @@ function allIssues(lead) {
   return [...gmb, ...web, ...speed];
 }
 
+// ---------------------------------------------------------------- fix plan
+// INTERNAL, agency-only. This is the "how to fix it" — the labour the agency is
+// paid for. It must NEVER reach the client (that's the audit report's job — to
+// convince, not to teach). So: no share link, no send buttons, labelled internal.
+//
+// The "how" is a static library keyed by the audit's factor keys, so there's no
+// per-lead AI cost — we assemble steps for THIS lead from findings already computed.
+const FIX_STEPS = {
+  // --- Google Business Profile ---
+  website: (l) => ({ eta: 10, steps: [
+    l.demoSiteId ? 'They have no site — use the demo website you already generated (open the lead → "Demo website"). Publish it and use that URL.'
+      : 'They have no site — spin one up (or generate the demo site from the lead) and get a live URL.',
+    'In the Google Business Profile → Edit profile → Contact → Website → paste the URL → Save.',
+  ] }),
+  rating: (l) => ({ eta: 20, steps: [
+    'Address the root cause of the low rating first (whatever the negative reviews complain about) — otherwise new reviews stay low.',
+    'Launch a review-request flow (SMS/QR after each job) to bury old scores under fresh 5-stars. LeadLion drafts the request message.',
+    'Reply to every existing negative review, professionally — LeadLion drafts these too (open the lead → review reply).',
+  ] }),
+  reviews: (l) => ({ eta: 15, steps: [
+    l.reviewInsight?.toTarget ? `Target: about ${l.reviewInsight.toTarget.needed} more 5-star reviews to reach ${l.reviewInsight.toTarget.target}★.` : 'Set a monthly review target and track it.',
+    'Set up a review-request step after every completed job — SMS or a QR code at the counter/invoice.',
+    'Use LeadLion to draft the request message; keep the Google review link one tap away.',
+  ] }),
+  claimed: () => ({ eta: 10, steps: [
+    'Claim/verify the listing at business.google.com — search the business, "Claim this business", verify by postcard, phone, or video.',
+    'Once verified, lock down the info so it can\'t drift (hours, category, phone, website).',
+  ] }),
+  photos: (l) => ({ eta: 15, steps: [
+    `Currently ${l.photoCount ?? 0} photos — get to 10+.`,
+    'Upload a spread: storefront/exterior, 2× interior, the team, a job in progress, and the logo. GBP → Photos → Add.',
+    'Ask the owner for real photos — stock hurts trust and can be flagged.',
+  ] }),
+  hours: () => ({ eta: 5, steps: [
+    'GBP → Edit profile → Hours → set regular opening hours.',
+    'Add special/holiday hours so "Is it open now?" is always answered.',
+  ] }),
+  phone: () => ({ eta: 3, steps: [
+    'GBP → Edit profile → Contact → Phone → add a number (a local area code beats a mobile for trust).',
+    'Make sure it matches the number on their website exactly (NAP consistency).',
+  ] }),
+  category: (l) => ({ eta: 5, steps: [
+    `Set the primary category to the most specific accurate one${l.category ? ` (currently "${esc(l.category)}")` : ''}.`,
+    'Add relevant secondary categories — they widen the searches you rank for. GBP → Edit profile → Category.',
+  ] }),
+  status: () => ({ eta: 30, steps: [
+    'The listing is flagged with a wrong status (e.g. closed) — this kills all traffic.',
+    'GBP → reopen / mark as operational. If Google resists, request reinstatement via Business Profile support.',
+  ] }),
+  // --- Website audit ---
+  https: () => ({ eta: 15, steps: ['Install an SSL certificate (most hosts offer it free via Let\'s Encrypt).', 'Force an HTTP→HTTPS redirect so the padlock always shows.'] }),
+  speed: () => ({ eta: 45, steps: ['Compress and convert images to WebP, enable caching, and defer non-critical JavaScript.', 'Re-test on Google PageSpeed Insights until mobile is green.'] }),
+  viewport: () => ({ eta: 5, steps: ['Add the responsive meta tag to <head>: <meta name="viewport" content="width=device-width, initial-scale=1">.'] }),
+  title: (l) => ({ eta: 5, steps: [`Write a keyword + location title tag (~60 chars), e.g. "${esc(l.keyword || 'Service')} in ${esc((l.location || 'City'))} | ${esc(l.name || 'Business')}".`] }),
+  metaDesc: () => ({ eta: 5, steps: ['Add a meta description (~155 chars) with the service, the city, and a clear call to action.'] }),
+  h1: () => ({ eta: 5, steps: ['Add one clear H1 on the homepage with the primary service + city.'] }),
+  contact: () => ({ eta: 10, steps: ['Put phone + address in the site header/footer, matching the Google listing exactly (NAP consistency).'] }),
+  whatsapp: () => ({ eta: 10, steps: ['Add a click-to-WhatsApp button/link for instant mobile enquiries — the single fastest conversion lift for local service sites.'] }),
+  booking: () => ({ eta: 20, steps: ['Add an online booking or quote-request form so visitors convert without having to call.'] }),
+  content: () => ({ eta: 60, steps: ['The site is thin — add real service pages: what you do, service areas, pricing/FAQ, a few case photos.'] }),
+  schema: () => ({ eta: 20, steps: ['Add LocalBusiness JSON-LD schema (name, address, phone, hours, geo) — helps rich results and local ranking.'] }),
+  analytics: () => ({ eta: 10, steps: ['Install analytics (GA4 or similar) so you can prove the results to the client later.'] }),
+  social: () => ({ eta: 5, steps: ['Link the business\'s social profiles from the site, and from the Google listing.'] }),
+  weight: () => ({ eta: 30, steps: ['The page is heavy — compress oversized images, lazy-load below-the-fold media, drop unused scripts.'] }),
+};
+
+function fixItems(lead) {
+  // Severity only — a stable sort preserves allIssues' natural order (Google
+  // listing first, then website, then speed), so within "critical" the GMB items
+  // lead. Don't tiebreak on point-loss: GMB is /20 and web is /100, so that would
+  // wrongly float every website issue above the listing ones.
+  const rank = { critical: 0, warning: 1, info: 2 };
+  return allIssues(lead)
+    .slice()
+    .sort((a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3))
+    .map((f) => {
+      const fx = FIX_STEPS[f.factor] ? FIX_STEPS[f.factor](lead, f) : { eta: 10, steps: [f.pitch || 'Fix this on the listing / site.'] };
+      return { finding: f, steps: fx.steps, eta: fx.eta };
+    });
+}
+
+function fixPlanText(lead) {
+  const items = fixItems(lead);
+  const nCrit = items.filter((i) => i.finding.severity === 'critical').length;
+  const eta = items.reduce((s, i) => s + (i.eta || 0), 0);
+  const lines = [
+    `GBP FIX PLAN — ${lead.name}  (INTERNAL — do NOT send to the client)`,
+    `${lead.address || ''}`,
+    `${items.length} item${items.length === 1 ? '' : 's'} · ${nCrit} critical · est ~${eta} min`,
+    '',
+  ];
+  items.forEach((it, i) => {
+    lines.push(`[ ] ${i + 1}. ${it.finding.text}  (${it.finding.severity || 'fix'})`);
+    if (it.finding.pitch) lines.push(`      Why: ${it.finding.pitch}`);
+    it.steps.forEach((s) => lines.push(`      - ${s.replace(/<[^>]+>/g, '')}`));
+    lines.push('');
+  });
+  return lines.join('\n');
+}
+
 function buildOutreach(lead) {
   const s = getSettings();
   const agency = s.agencyName || 'Your Agency';
@@ -430,6 +615,7 @@ const routes = {
   map: viewMap,
   settings: viewSettings,
   report: viewReport,
+  fixplan: viewFixPlan,
 };
 
 let lastSearch = null; // cache results between navigations
@@ -442,6 +628,44 @@ async function render() {
   document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === route));
   $('#main').innerHTML = '<p class="muted">Loading…</p>';
   await view(param);
+  injectStorageWarning();
+  // One modal at a time — both write to #modal-root. BYOK first (it gates live
+  // searching at all); the storage nudge gets the next render.
+  if (!maybeByokPrompt()) maybeSupaPrompt();
+}
+
+// First-run nudge: ask once, right after they land, whether to set BYOK up now.
+// Never for demo (there's no live search to fund) and never twice — we mark it
+// asked the moment it's shown, so navigating away doesn't turn it into a nag.
+function maybeByokPrompt() {
+  if (!SESSION || isDemo() || hasByok() || byokPrompted()) return false;
+  markByokPrompted();
+  $('#modal-root').innerHTML = `
+    <div class="modal-overlay" id="bp-overlay">
+      <div class="modal" style="max-width:530px">
+        <h2 style="margin-top:0">${ic('key')} Run searches on your own Google key?</h2>
+        <p class="muted" style="font-size:14px;line-height:1.65">
+          LeadLion's live searches can run on <b>your own free Google key</b>. Google bills you
+          directly — <b>usually $0</b>, thanks to a one-time $300 credit and a free monthly
+          allowance that renews — and <b>we take no cut</b>. Nothing gets rationed.
+        </p>
+        <div class="banner banner-info" style="font-size:12.5px;line-height:1.6;margin-top:12px">
+          ${ic('bulb')} Setup takes about <b>5 minutes</b> and we walk you through every step — then one click tests the key for you.
+        </div>
+        <div class="flex mt" style="margin-top:20px">
+          <button id="bp-setup">${ic('key')} Set up my key (5 min)</button>
+          <button class="btn-ghost" id="bp-later">Explore first</button>
+        </div>
+        <p class="muted" style="font-size:12px;margin-top:14px">
+          You can start this any time from <b>Settings</b>. <a href="/byok" target="_blank" rel="noopener" style="color:var(--accent)">What is BYOK, and why? ↗</a>
+        </p>
+      </div>
+    </div>`;
+  const close = () => { $('#modal-root').innerHTML = ''; };
+  $('#bp-later').onclick = close;
+  $('#bp-overlay').onclick = (e) => { if (e.target.id === 'bp-overlay') close(); };
+  $('#bp-setup').onclick = () => openByokWizard(0);
+  return true;
 }
 
 // -------- dashboard
@@ -1687,7 +1911,8 @@ async function openLeadModal(lead) {
         <div class="flex mt spread">
           <div class="flex">
             ${isSaved
-              ? `<a class="btn" href="#/report/${encodeURIComponent(l.id)}">${ic('file')} Audit report</a>`
+              ? `<a class="btn" href="#/report/${encodeURIComponent(l.id)}">${ic('file')} Audit report</a>
+                 <a class="btn-ghost btn" href="#/fixplan/${encodeURIComponent(l.id)}" title="Internal fix checklist — for you, not the client">${ic('checkCircle')} Fix plan</a>`
               : `<button id="save-lead">${ic('save')} Save lead</button>`}
             <button class="btn-wa" id="wa-quick">${ic('chat')} WhatsApp</button>
             ${(leadEmail(l) || l.website)
@@ -2192,6 +2417,47 @@ async function viewMap() {
 }
 
 // -------- report
+// INTERNAL fix plan — agency-only. Deliberately NOT a shareable/publishable route
+// (no /r/ link, no publish panel, no send buttons). It's the fulfilment recipe.
+async function viewFixPlan(id) {
+  const lead = await store.get(decodeURIComponent(id || ''));
+  if (!lead) { $('#main').innerHTML = '<div class="card">Lead not found. <a href="#/leads" style="color:var(--accent)">Back to leads</a></div>'; return; }
+  const items = fixItems(lead);
+  const nCrit = items.filter((i) => i.finding.severity === 'critical').length;
+  const eta = items.reduce((s, i) => s + (i.eta || 0), 0);
+  const sevIco = (s) => s === 'critical' ? '<span style="color:#dc2626">●</span>' : s === 'warning' ? '<span style="color:#d97706">●</span>' : '<span style="color:#2563eb">●</span>';
+
+  $('#main').innerHTML = `
+    <div class="flex spread mb no-print">
+      <a class="btn-ghost btn-sm" href="#/leads">← Back</a>
+      <div class="flex">
+        <button class="btn-ghost" id="fp-copy">${ic('file')} Copy checklist</button>
+        <button onclick="window.print()">${ic('printer')} Print / Save as PDF</button>
+      </div>
+    </div>
+    <div class="fixplan-flag">${sevIcon('critical')} <b>Internal — agency use only.</b> This is your fulfilment checklist (the “how”). <b>Do not send it to the client</b> — that’s what the audit report is for. Sending this hands over the work you’re paid to do.</div>
+    <div class="report-page">
+      <div class="report-head">
+        <div class="report-agency">GBP Fix Plan<div class="sub">Internal fulfilment checklist</div></div>
+        <div style="text-align:right;font-size:13px;color:#718096">${esc(getSettings().agencyName || '')}</div>
+      </div>
+      <h1 style="font-size:24px">${esc(lead.name)}</h1>
+      <p style="color:#4a5568">${esc(lead.address || '')}</p>
+      <p style="color:#718096;font-size:13px">${items.length} item${items.length === 1 ? '' : 's'} · ${nCrit} critical · estimated ~${eta} min of work</p>
+
+      ${items.length === 0
+        ? '<div class="report-section"><p>Nothing failing — this listing is already in good shape. Sell them growth, not repair.</p></div>'
+        : items.map((it, i) => `
+        <div class="fixplan-item">
+          <div class="fixplan-hd"><span class="fixplan-chk">☐</span> ${sevIco(it.finding.severity)} <b>${i + 1}. ${esc(it.finding.text)}</b> <span style="color:#94a3b8;font-weight:400;font-size:12px">~${it.eta} min</span></div>
+          ${it.finding.pitch ? `<div class="fixplan-why">Why it matters: ${esc(it.finding.pitch)}</div>` : ''}
+          <ol class="fixplan-steps">${it.steps.map((s) => `<li>${s}</li>`).join('')}</ol>
+        </div>`).join('')}
+    </div>`;
+
+  $('#fp-copy').onclick = () => { navigator.clipboard.writeText(fixPlanText(lead)); toast('Fix plan copied — paste into your task tool'); };
+}
+
 async function viewReport(id) {
   const lead = await store.get(decodeURIComponent(id || ''));
   if (!lead) { $('#main').innerHTML = '<div class="card">Lead not found. <a href="#/leads" style="color:var(--accent)">Back to leads</a></div>'; return; }
@@ -2477,6 +2743,261 @@ async function publishReport(lead) {
   }
 }
 
+// -------- BYOK onboarding wizard
+// Google Cloud setup is the single biggest friction in BYOK — it is the thing
+// LeadsGorilla buyers complain about, and an abandoned setup is a lost customer.
+// So it's a guided wizard with direct console links, not a buried accordion.
+// The two traps flagged in step 4 are ones we hit ourselves (see LEARNINGS §1):
+// "OK" silently discards the API restriction, and an Application restriction
+// blocks every request because our searches run server-side.
+
+// Shared by the Settings card and the wizard's last step.
+async function runKeyTest(key, box, btn) {
+  const prev = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span> Testing…`;
+  box.innerHTML = '';
+  try {
+    const res = await fetch('/api/testkey', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ googleKey: key }) });
+    const d = await res.json();
+    const cls = d.status === 'ok' ? 'banner-info' : 'banner-warn';
+    const icon = d.status === 'ok' ? ic('checkCircle', 'ic-ok')
+      : d.status === 'invalid-format' || d.status === 'empty' ? ic('alertTriangle', 'ic-warning')
+      : sevIcon('critical');
+    box.innerHTML = `<div class="banner ${cls}" style="font-size:12.5px;line-height:1.6">${icon} ${esc(d.message || 'Unknown result.')}</div>`;
+    return d.status === 'ok';
+  } catch (e) {
+    box.innerHTML = `<div class="banner banner-warn" style="font-size:12.5px">Test failed: ${esc(e.message)}</div>`;
+    return false;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prev;
+  }
+}
+
+const WIZ_STEPS = [
+  {
+    t: 'Create a Google Cloud project',
+    h: () => `
+      <p class="muted">Your key lives inside a Google Cloud <b>project</b> — a free container for it. Already have one? Skip ahead.</p>
+      <ol class="wiz-ol">
+        <li>Open the Google Cloud console.</li>
+        <li>Give the project any name (e.g. <code class="inline">leadlion</code>) and press <b>Create</b>.</li>
+      </ol>
+      <a class="btn" href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Open Google Cloud ↗</a>`,
+  },
+  {
+    t: 'Turn on the three APIs',
+    h: () => `
+      <p class="muted">LeadLion uses exactly three Google APIs — no more. Open each link and press <b>Enable</b>. Check your new project is selected in the console's top bar.</p>
+      <ol class="wiz-ol">
+        <li><b>Places API (New)</b> — finds the businesses<br>
+          <a href="https://console.cloud.google.com/apis/library/places.googleapis.com" target="_blank" rel="noopener">Enable Places API (New) ↗</a></li>
+        <li><b>Geocoding API</b> — turns a city name into a real map area<br>
+          <a href="https://console.cloud.google.com/apis/library/geocoding-backend.googleapis.com" target="_blank" rel="noopener">Enable Geocoding API ↗</a></li>
+        <li><b>PageSpeed Insights API</b> — the mobile speed audit<br>
+          <a href="https://console.cloud.google.com/apis/library/pagespeedonline.googleapis.com" target="_blank" rel="noopener">Enable PageSpeed Insights ↗</a></li>
+      </ol>`,
+  },
+  {
+    t: 'Create the API key',
+    h: () => `
+      <ol class="wiz-ol">
+        <li>Go to <b>APIs &amp; Services → Credentials</b>.</li>
+        <li>Click <b>+ Create credentials → API key</b>.</li>
+        <li>Copy the key it shows you — it starts with <code class="inline">AIza…</code>. Keep the tab open for the next step.</li>
+      </ol>
+      <a class="btn" href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Open Credentials ↗</a>`,
+  },
+  {
+    t: 'Lock the key down — and dodge two traps',
+    h: () => `
+      <p class="muted">Click your new key to edit it. Two settings matter, and both catch people out:</p>
+      <div class="banner banner-warn" style="font-size:12.5px;line-height:1.6;margin-bottom:10px">
+        ${ic('alertTriangle')} <b>Trap 1 — “OK” does not save.</b> Under <i>API restrictions</i> pick <b>Restrict key</b>, tick the three APIs, press <b>OK</b> — then press <b>Save</b> at the bottom of the page. OK on its own silently throws it away.
+      </div>
+      <div class="banner banner-warn" style="font-size:12.5px;line-height:1.6">
+        ${ic('alertTriangle')} <b>Trap 2 — leave <i>Application restrictions</i> on <code class="inline">None</code>.</b> Searches run from LeadLion's server, not your browser, so a “Websites” restriction blocks every single request. Restricting by <b>API</b> (above) is what actually secures the key.
+      </div>`,
+  },
+  {
+    t: 'Enable billing — you still pay nothing',
+    h: () => `
+      <p class="muted">Google wants a card on file before it serves live data, even on the free tier. <b>It isn't charged while you're inside the free allowance.</b></p>
+      <ul class="wiz-ol">
+        <li>New accounts get a one-time <b>$300 credit over 90 days</b>. During the trial Google <b>never</b> charges the card — services simply pause if you exhaust it.</li>
+        <li>After that a <b>free monthly allowance renews</b> each month. Most months genuinely cost nothing.</li>
+        <li>Settings keeps a usage counter so you always know where you stand.</li>
+      </ul>
+      <a class="btn" href="https://console.cloud.google.com/billing" target="_blank" rel="noopener">Open Billing ↗</a>`,
+  },
+  {
+    t: 'Paste your key and test it',
+    h: () => `
+      <p class="muted">Last step. Paste the key you copied, then hit <b>Test key</b> — it runs one real search so you know it works before you rely on it.</p>
+      <label>Google API key</label>
+      <div class="flex" style="gap:8px;align-items:stretch">
+        <input id="w-gkey" type="password" value="${esc(getSettings().googleApiKey || '')}" placeholder="AIza…" autocomplete="off" style="flex:1">
+        <button class="btn-ghost" id="w-test" type="button" style="white-space:nowrap">Test key</button>
+      </div>
+      <div id="w-result" style="margin-top:8px"></div>`,
+  },
+];
+
+function openByokWizard(i = 0) {
+  const step = WIZ_STEPS[i];
+  const last = i === WIZ_STEPS.length - 1;
+  $('#modal-root').innerHTML = `
+    <div class="modal-overlay" id="w-overlay">
+      <div class="modal" style="max-width:600px">
+        <button class="modal-close" id="w-close">✕</button>
+        <h2 style="margin-top:0">${ic('key')} Set up your Google key</h2>
+        <div class="wiz-bar"><div class="wiz-fill" style="width:${((i + 1) / WIZ_STEPS.length) * 100}%"></div></div>
+        <p class="muted" style="font-size:12.5px;margin:8px 0 18px">Step ${i + 1} of ${WIZ_STEPS.length} · about 5 minutes in total</p>
+        <h3 style="font-size:17px;margin-bottom:10px">${esc(step.t)}</h3>
+        ${step.h()}
+        <div class="flex spread mt" style="margin-top:22px">
+          <button class="btn-ghost" id="w-back" ${i === 0 ? 'disabled' : ''}>← Back</button>
+          ${last ? '<button id="w-finish">Save &amp; finish</button>' : '<button id="w-next">Next →</button>'}
+        </div>
+      </div>
+    </div>`;
+
+  const close = () => { $('#modal-root').innerHTML = ''; };
+  $('#w-close').onclick = close;
+  $('#w-overlay').onclick = (e) => { if (e.target.id === 'w-overlay') close(); };
+  $('#w-back').onclick = () => openByokWizard(i - 1);
+  if ($('#w-next')) $('#w-next').onclick = () => openByokWizard(i + 1);
+  if ($('#w-test')) $('#w-test').onclick = () => runKeyTest($('#w-gkey').value.trim(), $('#w-result'), $('#w-test'));
+  if ($('#w-finish')) $('#w-finish').onclick = () => {
+    saveSettings({ googleApiKey: $('#w-gkey').value.trim() });
+    markByokPrompted();
+    close();
+    toast(hasByok() ? 'Key saved — your searches now run on your own key' : 'Saved');
+    if (location.hash.includes('/settings')) viewSettings();
+  };
+}
+
+// -------- Supabase onboarding wizard
+// Supabase is expected on full accounts: leads in localStorage die with a cache
+// clear and never leave the machine. Same shape as the BYOK wizard — the schema
+// is fetched from /schema.sql rather than pasted in here, so it can't drift.
+const SUPA_STEPS = [
+  {
+    t: 'Create a free Supabase project',
+    h: () => `
+      <p class="muted">Supabase is a hosted Postgres database. The free tier is plenty for a lead pipeline, and the project is <b>yours</b> — we never see it.</p>
+      <ol class="wiz-ol">
+        <li>Sign in and create a new project (any name).</li>
+        <li>Pick a region near you and set a database password.</li>
+        <li>Give it a minute to finish provisioning.</li>
+      </ol>
+      <a class="btn" href="https://supabase.com/dashboard/new" target="_blank" rel="noopener">Create a Supabase project ↗</a>`,
+  },
+  {
+    t: 'Run the database schema',
+    h: () => `
+      <p class="muted">This creates the one <code class="inline">leads</code> table LeadLion needs, plus a security policy so only your key can read it.</p>
+      <ol class="wiz-ol">
+        <li>In Supabase open <b>SQL Editor → New query</b>.</li>
+        <li>Paste the script below and press <b>Run</b>. You should see <i>Success</i>.</li>
+      </ol>
+      <div class="flex spread" style="margin-bottom:6px">
+        <label style="margin:0">schema.sql</label>
+        <button class="btn-ghost btn-sm" id="sw-copy" type="button">Copy</button>
+      </div>
+      <textarea class="script" id="sw-sql" rows="6" readonly>Loading…</textarea>
+      <a class="btn mt" href="https://supabase.com/dashboard/project/_/sql/new" target="_blank" rel="noopener">Open SQL Editor ↗</a>`,
+  },
+  {
+    t: 'Copy your Project URL and anon key',
+    h: () => `
+      <p class="muted">In Supabase go to <b>Project Settings → API</b>. You need two values.</p>
+      <ol class="wiz-ol">
+        <li><b>Project URL</b> — looks like <code class="inline">https://xxxx.supabase.co</code></li>
+        <li><b>anon / public</b> key — the long <code class="inline">eyJ…</code> string</li>
+      </ol>
+      <div class="banner banner-error" style="font-size:12.5px;line-height:1.6">
+        ${sevIcon('critical')} <b>Use the <i>anon</i> key — never the <code class="inline">service_role</code> key.</b> service_role bypasses every security rule and would sit in your browser where anyone could take it. anon is the one meant for this.
+      </div>
+      <a class="btn mt" href="https://supabase.com/dashboard/project/_/settings/api" target="_blank" rel="noopener">Open API settings ↗</a>`,
+  },
+  {
+    t: 'Connect and test',
+    h: () => {
+      const s = getSettings();
+      return `
+      <p class="muted">Paste both values, then test — it runs a real read against your table so you know it works before you rely on it.</p>
+      <label>Project URL</label>
+      <input id="sw-url" value="${esc(s.supabaseUrl || '')}" placeholder="https://xxxx.supabase.co" autocomplete="off">
+      <label>Anon key</label>
+      <input id="sw-key" type="password" value="${esc(s.supabaseKey || '')}" placeholder="eyJ…" autocomplete="off">
+      <div class="flex mt"><button class="btn-ghost" id="sw-test" type="button">Test connection</button></div>
+      <div id="sw-result" style="margin-top:8px"></div>`;
+    },
+  },
+];
+
+function openSupaWizard(i = 0) {
+  const step = SUPA_STEPS[i];
+  const last = i === SUPA_STEPS.length - 1;
+  $('#modal-root').innerHTML = `
+    <div class="modal-overlay" id="sw-overlay">
+      <div class="modal" style="max-width:600px">
+        <button class="modal-close" id="sw-close">✕</button>
+        <h2 style="margin-top:0">${ic('database')} Connect your database</h2>
+        <div class="wiz-bar"><div class="wiz-fill" style="width:${((i + 1) / SUPA_STEPS.length) * 100}%"></div></div>
+        <p class="muted" style="font-size:12.5px;margin:8px 0 18px">Step ${i + 1} of ${SUPA_STEPS.length} · about 10 minutes in total</p>
+        <h3 style="font-size:17px;margin-bottom:10px">${esc(step.t)}</h3>
+        ${step.h()}
+        <div class="flex spread mt" style="margin-top:22px">
+          <button class="btn-ghost" id="sw-back" ${i === 0 ? 'disabled' : ''}>← Back</button>
+          ${last ? '<button id="sw-finish">Save &amp; finish</button>' : '<button id="sw-next">Next →</button>'}
+        </div>
+      </div>
+    </div>`;
+
+  const close = () => { $('#modal-root').innerHTML = ''; };
+  $('#sw-close').onclick = close;
+  $('#sw-overlay').onclick = (e) => { if (e.target.id === 'sw-overlay') close(); };
+  $('#sw-back').onclick = () => openSupaWizard(i - 1);
+  if ($('#sw-next')) $('#sw-next').onclick = () => openSupaWizard(i + 1);
+
+  // Step 2 — pull the real schema so this can never drift from the file we ship.
+  const sql = $('#sw-sql');
+  if (sql) {
+    fetch('/schema.sql').then((r) => r.text()).then((t) => { sql.value = t; })
+      .catch(() => { sql.value = '-- Could not load schema.sql — open /schema.sql directly.'; });
+    $('#sw-copy').onclick = () => { navigator.clipboard.writeText(sql.value); toast('schema.sql copied'); };
+  }
+
+  const connect = async (btn) => {
+    saveSettings({ supabaseUrl: $('#sw-url').value.trim(), supabaseKey: $('#sw-key').value.trim() });
+    const prev = btn.textContent;
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner"></span> Testing…`;
+    const ok = await initSupabase();
+    updateStorageBadge(ok);
+    btn.disabled = false;
+    btn.textContent = prev;
+    $('#sw-result').innerHTML = ok
+      ? `<div class="banner banner-info" style="font-size:12.5px;line-height:1.6">${ic('checkCircle', 'ic-ok')} Connected — your leads will sync from now on.</div>`
+      : `<div class="banner banner-warn" style="font-size:12.5px;line-height:1.6">${sevIcon('critical')} ${esc(supaError || 'Could not connect.')} Check the URL and anon key, and that schema.sql ran successfully.</div>`;
+    return ok;
+  };
+
+  if ($('#sw-test')) $('#sw-test').onclick = () => connect($('#sw-test'));
+  if ($('#sw-finish')) $('#sw-finish').onclick = async () => {
+    const ok = await connect($('#sw-finish'));
+    if (!ok) return; // stay put so they can fix it
+    markSupaPrompted();
+    close();
+    toast('Supabase connected');
+    await maybeOfferLeadMigration();
+    if (location.hash.includes('/settings')) viewSettings();
+  };
+}
+
 // -------- settings
 async function viewSettings() {
   const s = getSettings();
@@ -2526,29 +3047,37 @@ async function viewSettings() {
         <b>New to Google Cloud?</b> You start with a one-time free trial (currently <b>$300 in credit over 90 days</b>), so your first months cost nothing.
         After that, Google still includes a <b>free monthly usage allowance</b> that renews each month — the usage counter below resets on the 1st and shows where you stand. Beyond the free tier you pay Google directly, typically only in heavy months.
       </div>
-      <details style="margin-top:10px">
-        <summary class="muted" style="cursor:pointer;font-size:13px">How to get a key (5 minutes)</summary>
-        <ol class="muted" style="font-size:13px;margin:8px 0 0 18px;line-height:1.7">
-          <li>Go to <code class="inline">console.cloud.google.com</code> and create a project.</li>
-          <li>Enable these three APIs: <b>Places API (New)</b>, <b>Geocoding API</b>, <b>PageSpeed Insights API</b>.</li>
-          <li><b>APIs &amp; Services → Credentials → Create credentials → API key.</b></li>
-          <li>Click the key, and under <i>“APIs that can be accessed using this key”</i> restrict it to those three. Press <b>OK</b>, then <b>Save</b> at the bottom of the page — the OK button alone does not save.</li>
-          <li>Enable <b>billing</b> on the project (Google requires a card even for the free tier — it is not charged unless you exceed the free allowance). New accounts get the one-time $300 / 90-day trial; every account also gets a free monthly allowance that renews.</li>
-          <li>Paste the key above. That's it — your searches now run on your own account.</li>
-        </ol>
-        <p class="muted" style="font-size:12.5px;margin-top:8px">Leave <b>Application restrictions</b> on <b>None</b> — searches run from our server, so a website restriction would block every request.</p>
-      </details>
+      <div class="flex mt">
+        <button id="s-wizard">${ic('key')} ${hasByok() ? 'Re-run the setup guide' : 'Set up my key — guided (5 min)'}</button>
+        <a class="btn-ghost btn" href="/byok" target="_blank" rel="noopener">Why BYOK? ↗</a>
+      </div>
     </div>
 
     ${usageCard()}
 
     <div class="card mb">
-      <h2 style="margin-top:0">${ic('database')} Supabase sync <span class="badge badge-muted">optional</span></h2>
-      <p class="muted" style="font-size:13.5px">Leads live in this browser until you connect Supabase (then they sync across devices). Run <code class="inline">schema.sql</code> in your Supabase SQL editor first.</p>
-      <div class="grid" style="grid-template-columns:1fr 1fr">
-        <div><label>Project URL</label><input id="s-surl" value="${esc(s.supabaseUrl || '')}" placeholder="https://xxxx.supabase.co"></div>
-        <div><label>Anon key</label><input id="s-skey" type="password" value="${esc(s.supabaseKey || '')}" placeholder="eyJ…"></div>
+      <h2 style="margin-top:0">${ic('database')} Lead storage ${
+        supabase ? '<span class="badge badge-green">Supabase synced</span>'
+        : supaError ? '<span class="badge badge-red">sync error</span>'
+        : SESSION?.profile?.type === 'full' ? '<span class="badge badge-yellow">this browser only</span>'
+        : '<span class="badge badge-muted">optional on trial</span>'}</h2>
+      <p class="muted" style="font-size:13.5px">
+        Leads live in <b>this browser</b> until you connect your own Supabase project — then they survive a cache clear and follow you across devices.
+        It stays <b>your</b> database; nothing lands on our servers.
+      </p>
+      ${supaError ? `<div class="banner banner-error" style="font-size:12.5px;line-height:1.6;margin-bottom:10px">${sevIcon('critical')} <b>Sync is failing</b> — leads are saving to this browser only. <span class="muted">${esc(supaError)}</span></div>` : ''}
+      <div class="flex mb">
+        <button id="s-supa-wizard">${ic('database')} ${supabase ? 'Re-run the setup guide' : 'Connect a database — guided (10 min)'}</button>
+        <a class="btn-ghost btn" href="/schema.sql" target="_blank" rel="noopener">View schema.sql ↗</a>
       </div>
+      <details>
+        <summary class="muted" style="cursor:pointer;font-size:13px">Enter credentials manually</summary>
+        <div class="grid mt" style="grid-template-columns:1fr 1fr">
+          <div><label>Project URL</label><input id="s-surl" value="${esc(s.supabaseUrl || '')}" placeholder="https://xxxx.supabase.co"></div>
+          <div><label>Anon key</label><input id="s-skey" type="password" value="${esc(s.supabaseKey || '')}" placeholder="eyJ…"></div>
+        </div>
+        <p class="muted" style="font-size:12px;margin-top:8px">Use the <b>anon</b> key — never <code class="inline">service_role</code>.</p>
+      </details>
     </div>
 
     <div class="flex">
@@ -2581,30 +3110,11 @@ async function viewSettings() {
     const ok = await initSupabase();
     updateStorageBadge(ok);
     toast(ok ? 'Supabase connected' : 'Could not connect — check URL/key and that schema.sql was run');
+    if (ok) await maybeOfferLeadMigration();
   };
-  $('#s-test-key').onclick = async () => {
-    const key = $('#s-gkey').value.trim();
-    const box = $('#s-key-result');
-    const btn = $('#s-test-key');
-    const prev = btn.textContent;
-    btn.disabled = true;
-    btn.innerHTML = `<span class="spinner"></span> Testing…`;
-    box.innerHTML = '';
-    try {
-      const res = await fetch('/api/testkey', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ googleKey: key }) });
-      const d = await res.json();
-      const cls = d.status === 'ok' ? 'banner-info' : 'banner-warn';
-      const icon = d.status === 'ok' ? ic('checkCircle', 'ic-ok')
-        : d.status === 'invalid-format' || d.status === 'empty' ? ic('alertTriangle', 'ic-warning')
-        : sevIcon('critical');
-      box.innerHTML = `<div class="banner ${cls}" style="font-size:12.5px;line-height:1.6">${icon} ${esc(d.message || 'Unknown result.')}</div>`;
-    } catch (e) {
-      box.innerHTML = `<div class="banner banner-warn" style="font-size:12.5px">Test failed: ${esc(e.message)}</div>`;
-    } finally {
-      btn.disabled = false;
-      btn.textContent = prev;
-    }
-  };
+  $('#s-test-key').onclick = () => runKeyTest($('#s-gkey').value.trim(), $('#s-key-result'), $('#s-test-key'));
+  $('#s-wizard').onclick = () => openByokWizard(0);
+  $('#s-supa-wizard').onclick = () => openSupaWizard(0);
   const usageReset = $('#s-usage-reset');
   if (usageReset) usageReset.onclick = () => {
     localStorage.removeItem(USAGE_KEY);
@@ -2630,8 +3140,68 @@ function exportCsv(rows, name) {
 function updateStorageBadge(supaOk) {
   const b = $('#storage-badge');
   if (!b) return;
-  b.textContent = supaOk ? 'Supabase synced' : 'Local storage';
-  b.className = supaOk ? 'badge badge-green' : 'badge badge-muted';
+  if (supaOk) { b.textContent = 'Supabase synced'; b.className = 'badge badge-green'; b.title = ''; return; }
+  if (supaError) { b.textContent = 'Sync error'; b.className = 'badge badge-red'; b.title = supaError; return; }
+  b.textContent = 'Local storage';
+  b.className = 'badge badge-muted';
+  b.title = '';
+}
+
+// Storage state has to be visible, not inferred. Full accounts are expected to
+// run on Supabase, so they get a standing banner until they do:
+//   broken   -> red    (they think they're synced and aren't — the worst case)
+//   missing  -> amber  (works, but one cache clear from losing the pipeline)
+// Trial/demo are localStorage by design and are never nagged.
+function injectStorageWarning() {
+  if (SESSION?.profile?.type !== 'full') return;
+  const main = $('#main');
+  if (!main || $('#supa-warn')) return;
+  let cls, html;
+  if (supaError) {
+    cls = 'banner banner-error mb';
+    html = `${sevIcon('critical')} <b>Supabase sync is failing</b> — new leads are saving to <b>this browser only</b>.
+      <span class="muted" style="font-size:12px">${esc(supaError)}</span>
+      <a href="#/settings" style="color:var(--accent)">Fix in Settings →</a>`;
+  } else if (!supabase) {
+    cls = 'banner banner-warn mb';
+    html = `${ic('alertTriangle')} <b>Your leads live in this browser only.</b> Clearing browser data would erase them, and they won't follow you to another device.
+      <a href="#/settings" style="color:var(--accent)">Connect a database →</a>`;
+  } else return;
+  const div = document.createElement('div');
+  div.id = 'supa-warn';
+  div.className = cls;
+  div.innerHTML = html;
+  main.prepend(div);
+}
+
+// One-time modal for full accounts still on browser-only storage.
+function maybeSupaPrompt() {
+  if (SESSION?.profile?.type !== 'full' || supabase || supaError || supaPrompted()) return false;
+  markSupaPrompted();
+  const count = store.local().length;
+  $('#modal-root').innerHTML = `
+    <div class="modal-overlay" id="sp-overlay">
+      <div class="modal" style="max-width:530px">
+        <h2 style="margin-top:0">${ic('database')} Keep your leads somewhere safe</h2>
+        <p class="muted" style="font-size:14px;line-height:1.65">
+          ${count ? `Your <b>${count} saved lead${count === 1 ? '' : 's'}</b> currently live` : 'Your saved leads currently live'}
+          in <b>this browser only</b>. Clearing your browser data would erase them, and they never reach your other devices.
+        </p>
+        <div class="banner banner-info" style="font-size:12.5px;line-height:1.6;margin-top:12px">
+          ${ic('lock')} Connect your own free <b>Supabase</b> project and they're stored in <b>your</b> database — still nothing on our servers. Takes about 10 minutes, guided.
+        </div>
+        <div class="flex mt" style="margin-top:20px">
+          <button id="sp-go">${ic('database')} Connect a database</button>
+          <button class="btn-ghost" id="sp-later">Later</button>
+        </div>
+        <p class="muted" style="font-size:12px;margin-top:14px">You can start this any time from <b>Settings</b>. Until then, <b>Export CSV</b> is your backup.</p>
+      </div>
+    </div>`;
+  const close = () => { $('#modal-root').innerHTML = ''; };
+  $('#sp-later').onclick = close;
+  $('#sp-overlay').onclick = (e) => { if (e.target.id === 'sp-overlay') close(); };
+  $('#sp-go').onclick = () => openSupaWizard(0);
+  return true;
 }
 
 // ---------------------------------------------------------------- login gate
@@ -2678,7 +3248,11 @@ function enterApp() {
   if (gate) gate.remove();
   document.getElementById('app').style.display = '';
   renderSessionFoot();
-  initSupabase().then(updateStorageBadge).then(render);
+  initSupabase().then(async (ok) => {
+    updateStorageBadge(ok);
+    await render();
+    await maybeOfferLeadMigration();
+  });
 }
 
 function renderSessionFoot() {

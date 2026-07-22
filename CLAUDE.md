@@ -149,10 +149,10 @@ public/
 
 functions/
   _lib/
-    scoring.js    10-factor GMB score + reviewInsight() star-math
+    scoring.js    9-factor GMB score (100 pts) + reviewInsight() star-math
     reviews.js    AI review mining (Workers AI) + reply drafting + heuristic fallback
     places.js     shared Google Places helpers, geocodeCity, quadtree config
-    webaudit.js   13-factor website audit (regex heuristics, no DOM)
+    webaudit.js   14-factor website audit (regex heuristics, no DOM)
     pagespeed.js  Google Lighthouse mobile score
     reportPage.js server-rendered public report
     accounts.js   trial/full accounts in KV + resolveAccess()
