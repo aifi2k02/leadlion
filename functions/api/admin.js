@@ -29,7 +29,8 @@ export async function onRequestPost(context) {
     case 'create': {
       const a = newTrial({
         label: body.label, searches: body.searches, results: body.results, days: body.days,
-        apiBudget: body.apiBudget, aiCredits: body.aiCredits, deep: body.deep,
+        apiBudget: body.apiBudget, aiCredits: body.aiCredits,
+        deep: body.deep, download: body.download, share: body.share,
       });
       await putAccount(kv, a);
       return json({ account: a });

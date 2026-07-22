@@ -58,7 +58,7 @@ function shortCode() {
   return crypto.randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase();
 }
 
-export function newTrial({ label, searches, results, days, apiBudget, aiCredits, deep = false } = {}) {
+export function newTrial({ label, searches, results, days, apiBudget, aiCredits, deep = false, download = false, share = false } = {}) {
   const now = new Date();
   const num = (v, d) => (v === null || v === '' || v === undefined ? d : Number(v));
   return {
@@ -67,7 +67,9 @@ export function newTrial({ label, searches, results, days, apiBudget, aiCredits,
     type: 'trial',
     searchLimit: num(searches, TRIAL_DEFAULTS.searches),
     resultCap: num(results, TRIAL_DEFAULTS.results),
-    features: { deep: !!deep, download: false, share: false },
+    // Per-account feature flags — packages differ on these (a paid tier gets CSV
+    // export + shareable reports; a sample trial doesn't). Enforced server-side.
+    features: { deep: !!deep, download: !!download, share: !!share },
     searchesUsed: 0,
 
     // Cost meters. null = unlimited.

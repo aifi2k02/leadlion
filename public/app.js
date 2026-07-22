@@ -854,7 +854,14 @@ function trialBanner() {
     const credits = api === null || api === undefined
       ? ''
       : ` · <b>${api}</b> API credit${api === 1 ? '' : 's'} left`;
-    return `<div class="banner banner-warn mb">${ic('ticket')} <b>Trial account</b> — ${left} of ${p.searchLimit} searches left${credits} · up to ${p.resultCap} results each · exports &amp; sharing are disabled.<br><span style="font-size:12.5px">Add your own Google API key in <a href="#/settings" style="color:var(--accent)">Settings</a> for unlimited searches.</span></div>`;
+    // Say what this package actually includes — don't hardcode "exports disabled",
+    // since packages now differ on export/share/deep.
+    const perks = [];
+    if (p.features?.deep) perks.push('deep search');
+    if (p.features?.download) perks.push('CSV export');
+    if (p.features?.share) perks.push('report sharing');
+    const perkText = perks.length ? ` · includes ${perks.join(', ')}` : '';
+    return `<div class="banner banner-warn mb">${ic('ticket')} <b>${esc(p.label || 'Trial account')}</b> — ${left} of ${p.searchLimit} searches left${credits} · up to ${p.resultCap} results each${perkText}.<br><span style="font-size:12.5px">Add your own Google API key in <a href="#/settings" style="color:var(--accent)">Settings</a> for unlimited searches.</span></div>`;
   }
   if (p.type === 'demo') {
     return `<div class="banner banner-warn mb">${ic('beaker')} <b>Demo mode</b> — sample data only. Log out and enter an access code for live results.</div>`;
