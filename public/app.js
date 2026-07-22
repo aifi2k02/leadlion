@@ -496,8 +496,8 @@ function buildOutreach(lead) {
   const services = [...new Set([...(lead.services || []), ...(lead.webAudit?.issues || []).map((i) => i.service)])].filter(Boolean).join(', ') || 'local SEO';
 
   const c = lead.competitors;
-  const compLine = c && c.marketSize && (lead.reviewCount || 0) < c.medReviews
-    ? `\n\nFor context: you're currently ranked #${c.rankByReviews} of ${c.marketSize} for "${lead.keyword}" in your area — the typical business there has ${c.medReviews} reviews, while you have ${lead.reviewCount || 0}. That gap is closable.`
+  const compLine = c && c.marketSize && c.reviewTarget
+    ? `\n\nFor context: you're ranked #${c.rankByReviews} of ${c.marketSize} for "${lead.keyword}" in your area. Around ${c.reviewTarget.needed} more reviews would move you past ${c.reviewTarget.passN} competitor${c.reviewTarget.passN === 1 ? '' : 's'} — a very reachable first step.`
     : '';
 
   // Review intelligence line — only when it actually strengthens the pitch.
@@ -1109,7 +1109,35 @@ function attachCompetitorStats(results) {
     medPhotos: Math.round(median((x) => x.photoCount)),
     pctWebsite: Math.round((results.filter((x) => x.website).length / n) * 100),
   };
-  for (const r of results) r.competitors = { ...bench, rankByReviews: rank.get(r.placeId) };
+
+  // A raw "4,986 behind the median" gap is useless when the market is top-heavy
+  // (Google returns the most prominent businesses first, so in a big city the
+  // median is thousands). Instead give a CLOSABLE next step: how many reviews to
+  // overtake the next few rivals within reach. Per-business, since it depends on
+  // where each one sits.
+  const ascReviews = results.map((x) => x.reviewCount || 0).sort((a, b) => a - b);
+  function reviewTargetFor(me) {
+    if (me >= bench.medReviews) return null; // already at/above typical — no nudge
+    const above = ascReviews.filter((c) => c > me);
+    if (!above.length) return null;
+    // Aim to overtake the next up to 3 rivals, but only ones within a believable
+    // year of growth (~5x, or +500). If even the nearest rival is a huge jump,
+    // bail to the plain "vs typical" line rather than promise the unreachable.
+    const cap = Math.max(me * 5, me + 500);
+    let target = me, passN = 0;
+    for (const c of above) {
+      if (passN >= 3 || c > cap) break;
+      target = c; passN++;
+    }
+    if (!passN) return null;
+    return { needed: Math.max(1, target - me), passN };
+  }
+
+  for (const r of results) {
+    const myRank = rank.get(r.placeId);
+    const t = reviewTargetFor(r.reviewCount || 0);
+    r.competitors = { ...bench, rankByReviews: myRank, reviewTarget: t ? { ...t, toRank: Math.max(1, myRank - t.passN) } : null };
+  }
 }
 
 // Combined opportunity = GMB opportunity + a headroom-scaled boost from a weak
@@ -1495,7 +1523,9 @@ function competitorBlock(l) {
     <h2 style="font-size:15px">Competitor benchmark</h2>
     <p class="muted" style="font-size:13px">Ranked <b style="color:var(--accent)">#${c.rankByReviews}</b> of ${c.marketSize} by review volume for "${esc(l.keyword)}" in ${esc(l.location)} — vs the typical competitor:</p>
     <div class="mb">
-      ${cmp('Reviews', l.reviewCount, c.medReviews)}
+      ${c.reviewTarget
+        ? `<div class="finding"><span class="icon">${sevIcon('warning')}</span><div class="flex spread" style="flex:1"><span>Reviews</span><span><b>${l.reviewCount ?? 0}</b> <span class="muted">· ~${c.reviewTarget.needed} more to pass ${c.reviewTarget.passN} rival${c.reviewTarget.passN === 1 ? '' : 's'} → #${c.reviewTarget.toRank}</span></span></div></div>`
+        : cmp('Reviews', l.reviewCount, c.medReviews)}
       ${cmp('Rating', l.rating, c.medRating)}
       ${cmp('Photos', l.photoCount, c.medPhotos)}
       <div class="finding"><span class="icon">${l.website ? sevIcon('ok') : sevIcon('critical')}</span><div class="flex spread" style="flex:1"><span>Website</span><span><b>${l.website ? 'Yes' : 'No'}</b> <span class="muted">· ${c.pctWebsite}% of competitors have one</span></span></div></div>
@@ -2574,7 +2604,7 @@ async function viewReport(id) {
         <h2>${ic('barChart')} Competitor Benchmark</h2>
         <p style="color:#4a5568;font-size:14px">Ranked <b>#${lead.competitors.rankByReviews}</b> of ${lead.competitors.marketSize} by review volume for "${esc(lead.keyword)}" in ${esc(lead.location)}. Here's how you compare to the typical competitor:</p>
         <div class="report-meta-grid" style="margin-top:10px">
-          <span class="k">Reviews</span><span>${lead.reviewCount ?? 0} <span style="color:#718096">vs ${lead.competitors.medReviews} typical${(lead.reviewCount || 0) < lead.competitors.medReviews ? ` (${lead.competitors.medReviews - (lead.reviewCount || 0)} behind)` : ''}</span></span>
+          <span class="k">Reviews</span><span>${lead.reviewCount ?? 0} <span style="color:#718096">${lead.competitors.reviewTarget ? `· ~${lead.competitors.reviewTarget.needed} more to pass ${lead.competitors.reviewTarget.passN} competitor${lead.competitors.reviewTarget.passN === 1 ? '' : 's'}` : `vs ${lead.competitors.medReviews} typical`}</span></span>
           <span class="k">Rating</span><span>${lead.rating || 0}★ <span style="color:#718096">vs ${lead.competitors.medRating}★ typical</span></span>
           <span class="k">Photos</span><span>${lead.photoCount ?? 0} <span style="color:#718096">vs ${lead.competitors.medPhotos} typical</span></span>
           <span class="k">Website</span><span>${lead.website ? 'Yes' : 'No'} <span style="color:#718096">· ${lead.competitors.pctWebsite}% of competitors have one</span></span>
