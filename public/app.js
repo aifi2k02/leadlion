@@ -2299,7 +2299,12 @@ function openReplyModal(lead, selected = 0, tone = REPLY_TONES[0]) {
 
 // -------- my leads (pipeline)
 let leadsView = 'board'; // 'board' | 'list'
-let leadsFilter = { location: '', niche: '' }; // My Leads segment filter
+let leadsFilter = { location: '', niche: '', temp: '' }; // My Leads segment filter
+
+// Lead temperature = agency-facing priority, from combinedOpp (same thresholds as
+// the map legend, dashboard tiles and the search "Hot leads" chip). Hot = the
+// weakest listings = the easiest sell.
+const tempOf = (l) => { const o = combinedOpp(l); return o >= 55 ? 'hot' : o >= 30 ? 'warm' : 'cold'; };
 
 // Niche = Google's real business category, NOT the raw search term. A search for a
 // business name ("Dear You") would otherwise pollute the niche list with a name;
@@ -2313,15 +2318,23 @@ async function viewLeads() {
   // accumulates hundreds of leads here; the filter makes that pile usable.
   const locations = [...new Set(allLeads.map((l) => l.location).filter(Boolean))].sort();
   const niches = [...new Set(allLeads.map(nicheOf))].sort();
-  const leads = allLeads.filter((l) =>
+  // Segment by location + niche first; temperature counts are computed within that
+  // segment (so "Hot 4" means 4 hot leads in the current niche/location view).
+  const segLeads = allLeads.filter((l) =>
     (!leadsFilter.location || l.location === leadsFilter.location) &&
     (!leadsFilter.niche || nicheOf(l) === leadsFilter.niche));
-  const showFilters = allLeads.length && (locations.length > 1 || niches.length > 1);
-  const filtered = leadsFilter.location || leadsFilter.niche;
+  const tempCounts = { hot: 0, warm: 0, cold: 0 };
+  for (const l of segLeads) tempCounts[tempOf(l)]++;
+  const leads = segLeads.filter((l) => !leadsFilter.temp || tempOf(l) === leadsFilter.temp);
+  const showFilters = allLeads.length > 0;
+  const filtered = leadsFilter.location || leadsFilter.niche || leadsFilter.temp;
+  const tempChip = (key, label, color) =>
+    `<span class="chip ${leadsFilter.temp === key ? 'on' : ''}" data-temp="${key}"><span class="dot" style="background:${color}"></span>${label} ${tempCounts[key]}</span>`;
   const filterBar = showFilters ? `
     <div class="filter-bar" style="margin:16px 0 6px">
       ${niches.length > 1 ? `<select id="flt-niche" class="flt"><option value="">All niches</option>${niches.map((k) => `<option value="${esc(k)}" ${leadsFilter.niche === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>` : ''}
       ${locations.length > 1 ? `<select id="flt-loc" class="flt"><option value="">All locations</option>${locations.map((l) => `<option value="${esc(l)}" ${leadsFilter.location === l ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>` : ''}
+      ${tempChip('hot', 'Hot', '#f87171')}${tempChip('warm', 'Warm', '#fbbf24')}${tempChip('cold', 'Cold', '#34d399')}
       <span class="muted" style="font-size:12.5px">${leads.length} of ${allLeads.length} leads</span>
       ${filtered ? `<button class="btn-ghost btn-sm" id="flt-clear">Clear</button>` : ''}
     </div>` : '';
@@ -2361,7 +2374,10 @@ async function viewLeads() {
   });
   if ($('#flt-niche')) $('#flt-niche').onchange = (e) => { leadsFilter.niche = e.target.value; viewLeads(); };
   if ($('#flt-loc')) $('#flt-loc').onchange = (e) => { leadsFilter.location = e.target.value; viewLeads(); };
-  const clearFilter = () => { leadsFilter = { location: '', niche: '' }; viewLeads(); };
+  document.querySelectorAll('[data-temp]').forEach((c) => {
+    c.onclick = () => { leadsFilter.temp = leadsFilter.temp === c.dataset.temp ? '' : c.dataset.temp; viewLeads(); };
+  });
+  const clearFilter = () => { leadsFilter = { location: '', niche: '', temp: '' }; viewLeads(); };
   if ($('#flt-clear')) $('#flt-clear').onclick = clearFilter;
   if ($('#flt-clear-empty')) $('#flt-clear-empty').onclick = clearFilter;
   document.querySelectorAll('.lead-card').forEach((c) => {
