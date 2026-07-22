@@ -1625,10 +1625,11 @@ function openStitchPromptModal(lead) {
         <div class="flex spread"><label>Design brief</label><button class="btn-ghost btn-sm" id="copy-stitch">Copy</button></div>
         <textarea class="script" id="stitch-text" rows="10">${esc(prompt)}</textarea>
         <ol class="muted" style="font-size:12.5px;margin:10px 0 0 18px;line-height:1.7">
-          <li>Copy the brief above → open Stitch → paste → generate the design.</li>
-          <li>In Stitch: <b>Export → Code to Clipboard</b>.</li>
-          <li>Come back and click <b>Import the export</b> below to publish it.</li>
+          <li>Copy the brief above → open Stitch → paste → <b>Generate</b>.</li>
+          <li>In Stitch: click <b>Export</b> (top-right) → select <b>Code to Clipboard</b> → click <b>Copy</b>.</li>
+          <li>Back here, click <b>Import the export</b> below and paste (⌘V / Ctrl+V) to publish.</li>
         </ol>
+        <p class="muted" style="font-size:11.5px;margin:8px 0 0">${ic('inbox')} Stitch usually copies <b>two</b> documents (a mobile and a desktop version) — that's fine, paste all of it. The importer keeps the desktop one automatically.</p>
         <div class="flex mt spread">
           <div class="flex">
             <a class="btn" href="https://stitch.withgoogle.com/" target="_blank" rel="noopener">Open Google Stitch ↗</a>
@@ -1827,7 +1828,7 @@ function openImportSiteModal(lead) {
       <div class="modal">
         <button class="modal-close" id="close">✕</button>
         <h2>${ic('inbox')} Import & publish — ${esc(lead.name)}</h2>
-        <p class="muted mb">Paste the <b>Code to Clipboard</b> export from Stitch. It publishes to a private, shareable link you can send the prospect.</p>
+        <p class="muted mb">In Stitch, click <b>Export → Code to Clipboard → Copy</b>, then paste it below. It publishes to a private, shareable link you can send the prospect.</p>
 
         <div class="banner banner-warn mb" style="font-size:13px">
           ${ic('alertTriangle')} <b>Stitch invents content.</b> It commonly fabricates testimonials and opening hours. Before you send this to a real business, open the preview and make sure every review and detail is real.
@@ -1838,7 +1839,7 @@ function openImportSiteModal(lead) {
         </div>
 
         <label>Stitch HTML export</label>
-        <textarea class="script" id="import-html" rows="7" placeholder="Paste the full HTML from Stitch → Export → Code to Clipboard…"></textarea>
+        <textarea class="script" id="import-html" rows="7" placeholder="Paste the HTML from Stitch → Export → Code to Clipboard → Copy…"></textarea>
         <div id="quote-check" class="mt"></div>
 
         <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;font-weight:400;font-size:13px;cursor:pointer">
