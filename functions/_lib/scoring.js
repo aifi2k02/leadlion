@@ -92,16 +92,18 @@ const FACTORS = [
     max: 10,
     score: (b) => (b.claimed === false ? 0 : 10),
     finding: (b) =>
-      // NB: Places API (New) exposes NO claim-status field, so we must NOT assert
-      // a listing is "unclaimed" (it dies the moment a claimed owner reads it). This
-      // heuristic only fires when website + hours + photos are ALL absent — i.e. an
-      // observably thin, near-empty listing — so we say exactly that, hedged.
+      // NB: Places API (New) exposes NO claim-status field. So we HEDGE ("likely")
+      // rather than asserting UNCLAIMED as fact (which dies the moment a claimed
+      // owner reads it, and we can't know). But it stays CRITICAL and leads the
+      // pitch: for a thin listing (this heuristic fires only when website + hours +
+      // photos are all absent), claiming & building out the GBP is the foot-in-the-
+      // door sale, so it should be emphasised — just honestly.
       b.claimed === false
         ? {
             ok: false,
-            severity: 'warning',
-            text: 'Listing looks thin — likely unmanaged.',
-            pitch: 'A near-empty Google listing usually means nobody is actively managing it — claiming and building it out is the natural first project.',
+            severity: 'critical',
+            text: 'Likely an unclaimed or barely-managed listing.',
+            pitch: 'This is the foot-in-the-door: claiming the listing and building it out is the fastest, highest-impact first project — and the quickest way to start ranking in local search.',
             service: 'GMB optimization',
           }
         : { ok: true, text: 'Listing has the basics filled in.' },

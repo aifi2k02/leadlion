@@ -417,7 +417,7 @@ const STATUS_LABEL = { new: 'New', contacted: 'Contacted', meeting: 'Meeting', w
 // exposes none), so the old "UNCLAIMED — anyone could request ownership" becomes the
 // observable "thin/unmanaged listing".
 const HONEST_OVERRIDE = {
-  claimed: { severity: 'warning', text: 'Listing looks thin — likely unmanaged.', pitch: 'A near-empty Google listing usually means nobody is actively managing it — claiming and building it out is the natural first project.' },
+  claimed: { severity: 'critical', text: 'Likely an unclaimed or barely-managed listing.', pitch: 'This is the foot-in-the-door: claiming the listing and building it out is the fastest, highest-impact first project — and the quickest way to start ranking in local search.' },
 };
 function normFinding(f) {
   if (!f || f.ok) return f;
