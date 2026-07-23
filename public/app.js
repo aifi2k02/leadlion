@@ -2312,17 +2312,47 @@ const tempOf = (l) => { const o = combinedOpp(l); return o >= 55 ? 'hot' : o >= 
 // lead has no category.
 const nicheOf = (l) => l.category || l.keyword || 'Uncategorised';
 
+// Leads store the raw search string ("Riyadh", "riyadh", "Austin TX"), so the same
+// place/niche typed with different casing would otherwise appear as separate filter
+// options, each matching only its exact-cased leads. normKey() is the match key;
+// groupCI() dedupes case/whitespace-insensitively and returns one tidy label per
+// group (best-cased variant, lightly title-cased but preserving codes like TX/UK).
+const normKey = (s) => String(s == null ? '' : s).trim().toLowerCase();
+const smartTitle = (s) => String(s).trim().replace(/\S+/g, (w) => {
+  if (w.length <= 3 && w === w.toUpperCase() && /[A-Z]/.test(w)) return w; // codes: TX, UK, UAE
+  const rest = w.slice(1);
+  if (rest !== rest.toLowerCase() && rest !== rest.toUpperCase()) return w; // already mixed: McDonald
+  return w.charAt(0).toUpperCase() + rest.toLowerCase();
+});
+function groupCI(values) {
+  const groups = new Map(); // normalized key -> [original variants]
+  for (const raw of values) {
+    const v = String(raw == null ? '' : raw).trim();
+    if (!v) continue;
+    const key = v.toLowerCase();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(v);
+  }
+  const upperCount = (s) => (s.match(/[A-Z]/g) || []).length;
+  return [...groups.entries()]
+    // Pick the most-capitalized variant (keeps the user's "Austin TX" over "austin tx"),
+    // then normalize its casing for a consistent label.
+    .map(([key, variants]) => ({ key, label: smartTitle(variants.slice().sort((a, b) => upperCount(b) - upperCount(a))[0]) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
 async function viewLeads() {
   const allLeads = await store.list();
   // Segment the pipeline by location + niche — an agency running many cities/niches
   // accumulates hundreds of leads here; the filter makes that pile usable.
-  const locations = [...new Set(allLeads.map((l) => l.location).filter(Boolean))].sort();
-  const niches = [...new Set(allLeads.map(nicheOf))].sort();
+  const locations = groupCI(allLeads.map((l) => l.location).filter(Boolean));
+  const niches = groupCI(allLeads.map(nicheOf));
   // Segment by location + niche first; temperature counts are computed within that
-  // segment (so "Hot 4" means 4 hot leads in the current niche/location view).
+  // segment (so "Hot 4" means 4 hot leads in the current niche/location view). Match
+  // on normalized keys so "Riyadh" and "riyadh" are one group (see groupCI).
   const segLeads = allLeads.filter((l) =>
-    (!leadsFilter.location || l.location === leadsFilter.location) &&
-    (!leadsFilter.niche || nicheOf(l) === leadsFilter.niche));
+    (!leadsFilter.location || normKey(l.location) === leadsFilter.location) &&
+    (!leadsFilter.niche || normKey(nicheOf(l)) === leadsFilter.niche));
   const tempCounts = { hot: 0, warm: 0, cold: 0 };
   for (const l of segLeads) tempCounts[tempOf(l)]++;
   const leads = segLeads.filter((l) => !leadsFilter.temp || tempOf(l) === leadsFilter.temp);
@@ -2332,8 +2362,8 @@ async function viewLeads() {
     `<span class="chip ${leadsFilter.temp === key ? 'on' : ''}" data-temp="${key}"><span class="dot" style="background:${color}"></span>${label} ${tempCounts[key]}</span>`;
   const filterBar = showFilters ? `
     <div class="filter-bar" style="margin:16px 0 6px">
-      ${niches.length > 1 ? `<select id="flt-niche" class="flt"><option value="">All niches</option>${niches.map((k) => `<option value="${esc(k)}" ${leadsFilter.niche === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>` : ''}
-      ${locations.length > 1 ? `<select id="flt-loc" class="flt"><option value="">All locations</option>${locations.map((l) => `<option value="${esc(l)}" ${leadsFilter.location === l ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>` : ''}
+      ${niches.length > 1 ? `<select id="flt-niche" class="flt"><option value="">All niches</option>${niches.map((o) => `<option value="${esc(o.key)}" ${leadsFilter.niche === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>` : ''}
+      ${locations.length > 1 ? `<select id="flt-loc" class="flt"><option value="">All locations</option>${locations.map((o) => `<option value="${esc(o.key)}" ${leadsFilter.location === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>` : ''}
       ${tempChip('hot', 'Hot', '#f87171')}${tempChip('warm', 'Warm', '#fbbf24')}${tempChip('cold', 'Cold', '#34d399')}
       <span class="muted" style="font-size:12.5px">${leads.length} of ${allLeads.length} leads</span>
       ${filtered ? `<button class="btn-ghost btn-sm" id="flt-clear">Clear</button>` : ''}
