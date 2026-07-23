@@ -44,6 +44,7 @@ export const COST = {
 export const AI_COST = {
   mine: 1,
   reply: 1,
+  copy: 1, // cold email / GBP description — one Workers AI call, no Google call
 };
 
 const TRIAL_DEFAULTS = {

@@ -601,6 +601,47 @@ ${agency}`;
   return { email, call, whatsapp };
 }
 
+// Map each audit factor to the agency service that fixes it. Website-audit issues
+// already carry a `.service`; GMB findings are mapped here.
+const FACTOR_SERVICE = {
+  website: 'Website design',
+  https: 'Website speed & security', speed: 'Website speed & security', weight: 'Website speed & security', viewport: 'Website speed & security',
+  title: 'Local SEO', metaDesc: 'Local SEO', h1: 'Local SEO', schema: 'Local SEO', content: 'Local SEO',
+  contact: 'Conversion optimisation', whatsapp: 'Conversion optimisation', booking: 'Conversion optimisation',
+  analytics: 'Website analytics', social: 'Social presence',
+  rating: 'Reputation & reviews', reviews: 'Reputation & reviews',
+  claimed: 'Google Business Profile optimisation', status: 'Google Business Profile optimisation',
+  photos: 'Google Business Profile optimisation', hours: 'Google Business Profile optimisation',
+  phone: 'Google Business Profile optimisation', category: 'Google Business Profile optimisation',
+};
+
+// The ONE service to pitch a lead first (+ 1-2 runners-up), derived from the audit:
+// each issue votes for its service, weighted by severity. Deterministic and
+// explainable — grounded in the findings, not an AI guess. Agency-facing only.
+function serviceSuggestion(lead) {
+  const issues = allIssues(lead);
+  if (!issues.length) return null;
+  const weight = { critical: 3, warning: 2, info: 1 };
+  const score = {}, exemplar = {};
+  for (const f of issues) {
+    const svc = f.service || FACTOR_SERVICE[f.factor] || 'Local SEO';
+    score[svc] = (score[svc] || 0) + (weight[f.severity] || 1);
+    if (!exemplar[svc]) exemplar[svc] = f;
+  }
+  const ranked = Object.keys(score).sort((a, b) => score[b] - score[a]);
+  return { primary: ranked[0], reason: exemplar[ranked[0]]?.text || '', secondary: ranked.slice(1, 3) };
+}
+
+// Compact lead payload for the AI copy endpoint (/api/copy) — findings only, no
+// Google call. Shared by the cold-email and GBP-description generators.
+function copyLeadPayload(lead) {
+  return {
+    name: lead.name, category: lead.category, location: lead.location,
+    hasWebsite: !!lead.website,
+    topIssues: allIssues(lead).slice(0, 5).map((i) => ({ text: i.text })),
+  };
+}
+
 // Build a wa.me deep link. Prefers Google's international number; falls back to
 // national + a default country code from Settings. Empty number → WhatsApp
 // opens with the message pre-typed and the user picks the contact.
@@ -2041,6 +2082,7 @@ async function openLeadModal(lead) {
           ${l.phone ? `<span class="badge badge-muted">${ic('phone')} ${esc(l.phone)}</span>` : ''}
           ${l.website ? `<a class="badge badge-muted" href="${esc(l.website)}" target="_blank" style="text-decoration:none">${ic('globe')} website ↗</a>` : ''}
         </div>
+        ${(() => { const sg = serviceSuggestion(l); return sg ? `<div class="banner banner-info mb" style="font-size:13px">${ic('dollar','ic-pitch')} <b>Pitch this first:</b> ${esc(sg.primary)} — ${esc(sg.reason)}${sg.secondary.length ? ` <span class="muted">· also worth offering: ${sg.secondary.map(esc).join(', ')}</span>` : ''}</div>` : ''; })()}
         <h2 style="font-size:15px">GMB audit findings</h2>
         <div class="mb">
           ${l.findings.map((f) => `
@@ -2072,6 +2114,7 @@ async function openLeadModal(lead) {
               ? `<button class="btn-ghost" id="email-quick">${ic('mail')} Email</button>`
               : `<button class="btn-ghost" id="email-quick" disabled title="No website on this listing, so there's no email to find — reach them by WhatsApp or phone." style="opacity:.45;cursor:not-allowed">${ic('mail')} Email</button>`}
             <button class="btn-ghost" id="outreach">${ic('mail')} Scripts</button>
+            <button class="btn-ghost" id="gbp-desc" title="AI-write a Google Business Profile description to hand the client">${ic('pen')} GBP description</button>
           </div>
           <div class="flex">
             <button class="btn-ghost" id="close-bottom">✕ Close</button>
@@ -2229,6 +2272,7 @@ async function openLeadModal(lead) {
     $('#save-lead').onclick = async () => { await store.save(l); toast('Lead saved — audit report unlocked'); openLeadModal(l); };
   }
   $('#outreach').onclick = () => openOutreachModal(l);
+  if ($('#gbp-desc')) $('#gbp-desc').onclick = () => openGbpModal(l);
   $('#wa-quick').onclick = () => {
     if (!isSaved) store.save(l); // saving is cheap; keeps a record of who you contacted
     openWhatsApp(l);
@@ -2278,7 +2322,7 @@ function openOutreachModal(lead) {
         <button class="btn-wa mt" id="wa-send" style="width:100%">${ic('chat')} Open in WhatsApp with this message</button>
 
         ${lead.webAudit?.emails?.length ? `<div class="banner banner-info mt">${ic('mail')} Send email to: <b>${lead.webAudit.emails.map(esc).join(', ')}</b> <span class="muted">(found on their website)</span></div>` : ''}
-        <div class="flex spread mt"><label>Cold email</label><button class="btn-ghost btn-sm" data-copy="email">Copy</button></div>
+        <div class="flex spread mt"><label>Cold email</label><div class="flex" style="gap:6px"><button class="btn-ghost btn-sm" id="email-ai" title="Rewrite this email with AI around the lead's pain points">${ic('sparkles')} Write with AI</button><button class="btn-ghost btn-sm" data-copy="email">Copy</button></div></div>
         <textarea class="script" id="script-email" rows="11">${esc(email)}</textarea>
         <button class="btn mt" id="email-send" style="width:100%">${ic('mail')} Open in email${leadEmail(lead) ? ` — to ${esc(leadEmail(lead))}` : ' (add the recipient)'}</button>
         ${leadEmail(lead) ? ''
@@ -2314,6 +2358,78 @@ function openOutreachModal(lead) {
     toast(leadEmail(lead) ? `Opening email to ${leadEmail(lead)}` : 'Opening email — add the recipient');
     markContacted();
   };
+  // AI cold-email: rewrite the email box around this lead's real pain points.
+  const aiBtn = $('#email-ai');
+  if (aiBtn) aiBtn.onclick = async () => {
+    const box = $('#script-email');
+    const label = aiBtn.innerHTML;
+    aiBtn.disabled = true; aiBtn.innerHTML = '<span class="spinner"></span> Writing…';
+    try {
+      const s = getSettings();
+      const res = await fetch('/api/copy', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'coldEmail', code: accessCode(), lead: copyLeadPayload(lead),
+          service: serviceSuggestion(lead)?.primary,
+          agency: { name: s.agencyName, phone: s.agencyPhone, email: s.agencyEmail },
+        }),
+      });
+      const data = await res.json();
+      if (res.status === 402 || data.outOfCredits) { toast(data.error || 'Out of AI credits.'); return; }
+      if (data.text && data.source === 'ai') { box.value = data.text; toast('Rewrote the email with AI — review before sending.'); }
+      else toast('AI unavailable right now — kept the template.');
+    } catch { toast('Could not reach the AI — kept the template.'); }
+    finally { aiBtn.disabled = false; aiBtn.innerHTML = label; }
+  };
+}
+
+// GBP description — an AI-written Google Business Profile "About" the agency hands
+// the client (a fixing-module deliverable). Generates on open; regenerate on demand.
+function openGbpModal(lead) {
+  $('#modal-root').innerHTML = `
+    <div class="modal-overlay" id="overlay">
+      <div class="modal">
+        <button class="modal-close" id="close">✕</button>
+        <h2>${ic('pen')} GBP description — ${esc(lead.name)}</h2>
+        <p class="muted mb">A Google Business Profile description in the business's voice. Paste into <b>GBP → Edit profile → About</b>.</p>
+        <div class="banner banner-warn mb" style="font-size:13px">${ic('alertTriangle')} AI can drift — read it and make sure every detail is true for this business before publishing.</div>
+        <div class="flex spread"><label>Description <span class="muted" id="gbp-count"></span></label><button class="btn-ghost btn-sm" id="gbp-copy">Copy</button></div>
+        <textarea class="script" id="gbp-text" rows="8" placeholder="Generating…"></textarea>
+        <div class="muted" style="font-size:12px;margin-top:4px" id="gbp-note"></div>
+        <div class="flex mt spread">
+          <button id="gbp-regen">↻ Regenerate</button>
+          <button class="btn-ghost" id="close-bottom">✕ Close</button>
+        </div>
+      </div>
+    </div>`;
+  const back = () => openLeadModal(lead);
+  $('#close').onclick = back;
+  $('#close-bottom').onclick = back;
+  $('#overlay').onclick = (e) => { if (e.target.id === 'overlay') $('#modal-root').innerHTML = ''; };
+  $('#gbp-copy').onclick = () => { navigator.clipboard.writeText($('#gbp-text').value); toast('Description copied'); };
+
+  async function generate() {
+    const box = $('#gbp-text');
+    const note = $('#gbp-note');
+    const btn = $('#gbp-regen');
+    box.value = ''; box.placeholder = 'Writing…'; btn.disabled = true;
+    try {
+      const res = await fetch('/api/copy', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'gbpDescription', code: accessCode(), lead: copyLeadPayload(lead), service: serviceSuggestion(lead)?.primary }),
+      });
+      const data = await res.json();
+      if (res.status === 402 || data.outOfCredits) { box.placeholder = 'Out of AI credits.'; note.textContent = data.error || ''; return; }
+      box.value = data.text || '';
+      $('#gbp-count').textContent = `${(data.text || '').length} chars`;
+      note.textContent = data.source === 'ai' ? 'Written by AI. Edit before publishing.' : 'Template draft (the AI model was unavailable). Edit before publishing.';
+    } catch (e) {
+      box.placeholder = 'Could not generate a description.';
+      note.textContent = e.message;
+    } finally { btn.disabled = false; }
+  }
+  $('#gbp-regen').onclick = generate;
+  generate();
 }
 
 // -------- review reply drafting (the deliverable you hand over on the call)
