@@ -429,10 +429,13 @@ function normFinding(f) {
 
 function allIssues(lead) {
   // GMB issues first, then website-audit issues, then speed — criticals first.
-  // Normalize BEFORE sorting so a downgraded severity (e.g. claimed) demotes properly.
+  // Normalize BEFORE sorting. For a thin/unclaimed listing, LEAD with the claim-&-
+  // setup finding: it's the umbrella opportunity (the other gaps are symptoms), so
+  // it should head the outreach drafts — not sit 4th behind its own symptoms.
   const rank = { critical: 0, warning: 1, info: 2 };
+  const sortKey = (f) => (f.factor === 'claimed' && !f.ok ? -1 : (rank[f.severity] ?? 3));
   const norm = (arr) => (arr || []).map(normFinding);
-  const gmb = norm(lead.issues).sort((a, b) => rank[a.severity] - rank[b.severity]);
+  const gmb = norm(lead.issues).sort((a, b) => sortKey(a) - sortKey(b));
   const web = norm(lead.webAudit?.issues).sort((a, b) => rank[a.severity] - rank[b.severity]);
   const speed = lead.pageSpeed?.ok && !lead.pageSpeed.finding.ok ? [lead.pageSpeed.finding] : [];
   return [...gmb, ...web, ...speed];
