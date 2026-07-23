@@ -46,20 +46,19 @@ export async function onRequestPost(context) {
   const action = body.action === 'gbpDescription' ? 'gbpDescription' : 'coldEmail';
   const lead = sanitizeLead(body.lead);
   const service = String(body.service || '').slice(0, 80) || null;
+  const angle = ['get-online', 'grow'].includes(body.angle) ? body.angle : undefined;
   const agency = sanitizeAgency(body.agency);
   const code = (body.code || '').trim();
   const kv = context.env.REPORTS;
   const ai = context.env.AI || null;
 
-  const run = () => action === 'gbpDescription'
-    ? writeGbpDescription({ ai, lead, service })
-    : writeColdEmail({ ai, lead, service, agency });
+  const run = (aiBinding) => action === 'gbpDescription'
+    ? writeGbpDescription({ ai: aiBinding, lead, service })
+    : writeColdEmail({ ai: aiBinding, lead, service, agency, angle });
 
   // Demo (no code): template only, never spends AI.
   if (!code) {
-    const r = await (action === 'gbpDescription'
-      ? writeGbpDescription({ ai: null, lead, service })
-      : writeColdEmail({ ai: null, lead, service, agency }));
+    const r = await run(null);
     return json({ ...r, demo: true });
   }
 
@@ -74,6 +73,6 @@ export async function onRequestPost(context) {
     }, 402);
   }
 
-  const result = await run();
+  const result = await run(ai);
   return json({ ...result, aiRemaining: account ? aiRemaining(account) : null });
 }

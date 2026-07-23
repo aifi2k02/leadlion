@@ -632,6 +632,11 @@ function serviceSuggestion(lead) {
   return { primary: ranked[0], reason: exemplar[ranked[0]]?.text || '', secondary: ranked.slice(1, 3) };
 }
 
+// Cold-email angle from OBSERVABLE signals (website presence), never the unreliable
+// claimed guess. no website → "get-online"; has website → established → "grow".
+const outreachAngle = (lead) => lead.website ? 'grow' : 'get-online';
+const ANGLE_LABEL = { 'get-online': 'Get online (no website)', 'grow': 'Grow & optimise' };
+
 // Compact lead payload for the AI copy endpoint (/api/copy) — findings only, no
 // Google call. Shared by the cold-email and GBP-description generators.
 function copyLeadPayload(lead) {
@@ -2348,7 +2353,11 @@ function openOutreachModal(lead) {
         <button class="btn-wa mt" id="wa-send" style="width:100%">${ic('chat')} Open in WhatsApp with this message</button>
 
         ${lead.webAudit?.emails?.length ? `<div class="banner banner-info mt">${ic('mail')} Send email to: <b>${lead.webAudit.emails.map(esc).join(', ')}</b> <span class="muted">(found on their website)</span></div>` : ''}
-        <div class="flex spread mt"><label>Cold email</label><div class="flex" style="gap:6px"><button class="btn-ghost btn-sm" id="email-ai" title="Rewrite this email with AI around the lead's pain points">${ic('sparkles')} Write with AI</button><button class="btn-ghost btn-sm" data-copy="email">Copy</button></div></div>
+        <div class="flex spread mt"><label>Cold email</label><div class="flex" style="gap:6px">
+          <select id="email-angle" class="flt" style="width:auto;min-width:0;padding:5px 9px;font-size:12.5px" title="Email angle — auto-picked from whether they have a website">
+            ${Object.entries(ANGLE_LABEL).map(([k, v]) => `<option value="${k}" ${outreachAngle(lead) === k ? 'selected' : ''}>Angle: ${esc(v)}</option>`).join('')}
+          </select>
+          <button class="btn-ghost btn-sm" id="email-ai" title="Rewrite this email with AI around the lead's pain points">${ic('sparkles')} Write with AI</button><button class="btn-ghost btn-sm" data-copy="email">Copy</button></div></div>
         <textarea class="script" id="script-email" rows="11">${esc(email)}</textarea>
         <button class="btn mt" id="email-send" style="width:100%">${ic('mail')} Open in email${leadEmail(lead) ? ` — to ${esc(leadEmail(lead))}` : ' (add the recipient)'}</button>
         ${leadEmail(lead) ? ''
@@ -2397,6 +2406,7 @@ function openOutreachModal(lead) {
         body: JSON.stringify({
           action: 'coldEmail', code: accessCode(), lead: copyLeadPayload(lead),
           service: serviceSuggestion(lead)?.primary,
+          angle: $('#email-angle')?.value,
           agency: { name: s.agencyName, phone: s.agencyPhone, email: s.agencyEmail },
         }),
       });
