@@ -52,7 +52,7 @@ export async function onRequestPost(context) {
 
   return json({
     cityResolved: true,
-    resolvedCity: geo.address || geo.name,
+    resolvedCity: geo.label || geo.address || geo.name,
     resolvedLevel: geo.level || 'city',
     depth,
     zones,

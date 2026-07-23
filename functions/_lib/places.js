@@ -179,12 +179,21 @@ async function geocodeViaGeocodingApi(location, apiKey) {
     for (const tier of GEO_TIERS) {
       const hit = data.results.find((r) => (r.types || []).some((t) => tier.includes(t)) && r.geometry?.viewport);
       if (hit) {
+        // Build a clean "City, Country" from structured components (not string
+        // parsing) — robust across locales, and free (already in the response).
+        const comps = hit.address_components || [];
+        const comp = (type) => comps.find((c) => (c.types || []).includes(type))?.long_name;
+        const country = comp('country');
+        const cityName = comp('locality') || comp('postal_town') || comp('administrative_area_level_2')
+          || comp('administrative_area_level_1') || (hit.formatted_address || '').split(',')[0].trim();
+        const label = country && cityName && cityName !== country ? `${cityName}, ${country}` : (cityName || country || hit.formatted_address);
         return {
           ok: true,
           geo: {
             viewport: viewportFromGeocoding(hit.geometry.viewport),
             name: hit.formatted_address,
             address: hit.formatted_address,
+            label,
             level: tier.includes('sublocality') ? 'area' : 'city',
           },
         };
@@ -212,10 +221,17 @@ async function geocodeViaPlaces(location, apiKey) {
   for (const tier of GEO_TIERS) {
     const hit = places.find((p) => (p.types || []).some((t) => tier.includes(t)));
     if (hit) {
+      // No structured components here — take the country from the last address
+      // segment (guarding against a bare postal code) to build "City, Country".
+      const parts = (hit.formattedAddress || '').split(',').map((s) => s.trim()).filter(Boolean);
+      const country = parts.length ? parts[parts.length - 1] : '';
+      const city = hit.displayName?.text || parts[0] || location;
+      const label = country && /[A-Za-z]/.test(country) && city !== country ? `${city}, ${country}` : city;
       return {
         viewport: hit.viewport,
         name: hit.displayName?.text || location,
         address: hit.formattedAddress || '',
+        label,
         level: tier.includes('sublocality') ? 'area' : 'city',
       };
     }
@@ -230,11 +246,12 @@ export async function geocodeCity(location, apiKey) {
   return await geocodeViaPlaces(location, apiKey);
 }
 
-// The clean, short city name to stamp on a lead — the geocoded canonical city, first
-// segment only ("Los Angeles, CA, USA" -> "Los Angeles"). This is what corrects a
-// mistyped search term ("Los Angls") to the real city Google resolved it to. Falls
-// back to the raw typed string when the term couldn't be geocoded.
+// The clean "City, Country" to stamp on a lead — built from the geocoder's structured
+// components ("Riyadh, Saudi Arabia", "Los Angeles, USA"). This corrects a mistyped
+// term ("Los Angls" -> "Los Angeles, USA") AND keeps the country so same-name cities
+// read distinctly. Falls back to the first address segment, then the typed string.
 export function cityLabel(geo, fallback = '') {
+  if (geo && geo.label) return geo.label;
   const src = geo && (geo.name || geo.address);
   const first = src ? String(src).split(',')[0].trim() : '';
   return first || fallback;
