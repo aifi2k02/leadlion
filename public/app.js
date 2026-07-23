@@ -2103,19 +2103,32 @@ async function openLeadModal(lead) {
           <div class="muted" style="font-size:12px;margin-top:4px">Changes save automatically.</div>
           <label>Notes <span id="notes-fb" class="save-fb"></span></label>
           <textarea id="lead-notes" rows="3" placeholder="Call outcomes, contact name, next steps…">${esc(l.notes || '')}</textarea>` : ''}
-        <div class="flex mt spread">
-          <div class="flex">
+        <!-- Prospect = pitch & close; Deliver = fulfilment once the client is won. -->
+        <div class="seg no-print" style="margin-top:16px">
+          <button class="seg-btn on" data-ltab="prospect">Prospect &amp; close</button>
+          <button class="seg-btn" data-ltab="deliver">Deliver</button>
+        </div>
+        <div id="ltab-prospect" class="flex mt" style="flex-wrap:wrap">
+          ${isSaved
+            ? `<a class="btn" href="#/report/${encodeURIComponent(l.id)}">${ic('file')} Audit report</a>`
+            : `<button id="save-lead">${ic('save')} Save lead</button>`}
+          <button class="btn-wa" id="wa-quick">${ic('chat')} WhatsApp</button>
+          ${(leadEmail(l) || l.website)
+            ? `<button class="btn-ghost" id="email-quick">${ic('mail')} Email</button>`
+            : `<button class="btn-ghost" id="email-quick" disabled title="No website on this listing, so there's no email to find — reach them by WhatsApp or phone." style="opacity:.45;cursor:not-allowed">${ic('mail')} Email</button>`}
+          <button class="btn-ghost" id="outreach">${ic('mail')} Scripts</button>
+        </div>
+        <div id="ltab-deliver" class="mt" style="display:none">
+          <p class="muted" style="font-size:12.5px;margin:0 0 10px">${ic('checkCircle')} For <b>after you've closed the client</b> — your team's fulfilment deliverables. These are drafts your team applies; LeadLion never touches the client's live listing.</p>
+          <div class="flex" style="flex-wrap:wrap">
             ${isSaved
-              ? `<a class="btn" href="#/report/${encodeURIComponent(l.id)}">${ic('file')} Audit report</a>
-                 <a class="btn-ghost btn" href="#/fixplan/${encodeURIComponent(l.id)}" title="Internal fix checklist — for you, not the client">${ic('checkCircle')} Fix plan</a>`
-              : `<button id="save-lead">${ic('save')} Save lead</button>`}
-            <button class="btn-wa" id="wa-quick">${ic('chat')} WhatsApp</button>
-            ${(leadEmail(l) || l.website)
-              ? `<button class="btn-ghost" id="email-quick">${ic('mail')} Email</button>`
-              : `<button class="btn-ghost" id="email-quick" disabled title="No website on this listing, so there's no email to find — reach them by WhatsApp or phone." style="opacity:.45;cursor:not-allowed">${ic('mail')} Email</button>`}
-            <button class="btn-ghost" id="outreach">${ic('mail')} Scripts</button>
+              ? `<a class="btn-ghost btn" href="#/fixplan/${encodeURIComponent(l.id)}" title="Internal fix checklist — for you, not the client">${ic('checkCircle')} Fix plan</a>`
+              : `<span class="muted" style="font-size:12.5px;align-self:center">Save this lead to build its fix plan.</span>`}
             <button class="btn-ghost" id="gbp-desc" title="AI-write a Google Business Profile description to hand the client">${ic('pen')} GBP description</button>
           </div>
+        </div>
+        <div class="flex mt spread">
+          <span></span>
           <div class="flex">
             <button class="btn-ghost" id="close-bottom">✕ Close</button>
             ${isSaved ? `<button class="btn-danger btn-sm" id="del-lead">Delete</button>` : ''}
@@ -2128,6 +2141,19 @@ async function openLeadModal(lead) {
   $('#close').onclick = close;
   $('#close-bottom').onclick = close;
   $('#overlay').onclick = (e) => { if (e.target.id === 'overlay') close(); };
+
+  // Prospect / Deliver tabs — scoped to the modal so they never touch the board's
+  // own .seg-btn toggle elsewhere in the document.
+  $('#modal-root').querySelectorAll('[data-ltab]').forEach((t) => {
+    t.onclick = () => {
+      $('#modal-root').querySelectorAll('[data-ltab]').forEach((x) => x.classList.toggle('on', x === t));
+      // Use style.display, not [hidden]: the .flex class sets display:flex and
+      // would override the hidden attribute (low-specificity UA rule).
+      const pv = $('#ltab-prospect'), dv = $('#ltab-deliver');
+      if (pv) pv.style.display = t.dataset.ltab === 'prospect' ? '' : 'none';
+      if (dv) dv.style.display = t.dataset.ltab === 'deliver' ? '' : 'none';
+    };
+  });
 
   const auditBtn = $('#run-webaudit');
   if (auditBtn) {
