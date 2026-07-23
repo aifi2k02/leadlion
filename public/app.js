@@ -789,7 +789,7 @@ async function viewFind() {
     <div class="card">
       <div class="search-row">
         <div class="field"><label>Niche / keyword</label><input id="kw" placeholder="e.g. plumber, dentist, roofing" value="${esc(lastSearch?.keyword || '')}"></div>
-        <div class="field"><label>Location</label><input id="loc" placeholder="e.g. Austin TX, Manchester UK" value="${esc(lastSearch?.location || '')}"></div>
+        <div class="field ac-field"><label>Location</label><input id="loc" placeholder="e.g. Hyderabad, Pakistan" value="${esc(lastSearch?.location || '')}" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false"><div id="loc-ac" class="ac-menu" hidden role="listbox"></div></div>
         <button id="go">Search</button>
       </div>
       ${depthPicker}
@@ -798,9 +798,82 @@ async function viewFind() {
     <div id="results"></div>
   `;
   $('#go').onclick = runSearch;
-  $('#kw').onkeydown = $('#loc').onkeydown = (e) => { if (e.key === 'Enter') runSearch(); };
+  $('#kw').onkeydown = (e) => { if (e.key === 'Enter') runSearch(); };
   wireDepthPicker();
+  wireCityAutocomplete(); // owns #loc's keydown (arrows/enter/escape), falls back to runSearch
   if (lastSearch?.results) renderResults(lastSearch);
+}
+
+// City autocomplete on the Location box. Suggestions come from Google Places
+// Autocomplete (New) via /api/autocomplete, pre-disambiguated ("Hyderabad, Pakistan"
+// vs "Hyderabad, India"). Picking one fills the box with the fully-qualified string,
+// which the existing search paths already geocode correctly — so typos and same-name
+// cities are both solved at the input, with no changes to plan/zones/search.
+function wireCityAutocomplete() {
+  const input = $('#loc');
+  const menu = $('#loc-ac');
+  if (!input || !menu) return;
+
+  let items = [];
+  let active = -1;
+  let token = (window.crypto?.randomUUID ? crypto.randomUUID() : String(Math.random())); // one Google session per typing run
+  let debounce = null;
+  let ctrl = null;      // aborts a stale in-flight request
+  let lastQuery = '';
+
+  const close = () => { menu.hidden = true; input.setAttribute('aria-expanded', 'false'); active = -1; };
+  const paint = () => {
+    menu.innerHTML = items.map((it, i) => `
+      <div class="ac-opt ${i === active ? 'active' : ''}" role="option" data-i="${i}">
+        <span class="ac-main">${esc(it.main)}</span>
+        ${it.secondary ? `<span class="ac-sec">${esc(it.secondary)}</span>` : ''}
+      </div>`).join('');
+    menu.hidden = items.length === 0;
+    input.setAttribute('aria-expanded', items.length ? 'true' : 'false');
+    // mousedown (not click) so the pick fires before the input's blur hides the menu.
+    menu.querySelectorAll('.ac-opt').forEach((el) => {
+      el.onmousedown = (e) => { e.preventDefault(); pick(items[+el.dataset.i]); };
+    });
+  };
+  const pick = (it) => {
+    if (!it) return;
+    input.value = it.description;
+    items = []; close();
+    token = (window.crypto?.randomUUID ? crypto.randomUUID() : String(Math.random())); // selection ends the session
+  };
+
+  const fetchSuggest = async (q) => {
+    if (ctrl) ctrl.abort();
+    ctrl = new AbortController();
+    try {
+      const res = await fetch('/api/autocomplete', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: spendBody({ input: q, sessionToken: token }), signal: ctrl.signal,
+      });
+      const data = await res.json();
+      if (q !== lastQuery) return; // a newer keystroke already superseded this
+      items = data.suggestions || []; active = -1; paint();
+    } catch { /* aborted or offline — leave the box as free text */ }
+  };
+
+  input.oninput = () => {
+    const q = input.value.trim();
+    lastQuery = q;
+    clearTimeout(debounce);
+    if (isDemo() || q.length < 3) { items = []; close(); return; }
+    debounce = setTimeout(() => fetchSuggest(q), 280);
+  };
+  input.onkeydown = (e) => {
+    const open = !menu.hidden && items.length;
+    if (e.key === 'ArrowDown' && open) { e.preventDefault(); active = (active + 1) % items.length; paint(); }
+    else if (e.key === 'ArrowUp' && open) { e.preventDefault(); active = (active - 1 + items.length) % items.length; paint(); }
+    else if (e.key === 'Escape') { close(); }
+    else if (e.key === 'Enter') {
+      if (open && active >= 0) { e.preventDefault(); pick(items[active]); }
+      else { close(); runSearch(); }
+    }
+  };
+  input.onblur = () => setTimeout(close, 120); // let a click/mousedown land first
 }
 
 // Custom search-depth dropdown: compact toggle + rich menu (coloured dot, title,

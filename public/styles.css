@@ -136,6 +136,26 @@ body {
 .dd-opt.sel { background: var(--accent-soft); }
 .dd-check { margin-left: auto; flex-shrink: 0; opacity: 0; }
 .dd-opt.sel .dd-check { opacity: 1; }
+
+/* City autocomplete under the Location box (mirrors .dd-menu). .card no longer
+   clips overflow, so this absolute menu shows fully. */
+.ac-field { position: relative; }
+.ac-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 45;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg);
+  padding: 6px; overflow: hidden auto; max-height: 300px;
+  animation: dd-in 0.14s var(--ease);
+}
+.ac-menu[hidden] { display: none; }
+.ac-opt {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 9px 12px; border-radius: var(--radius-sm); cursor: pointer;
+  transition: background 0.12s var(--ease);
+}
+.ac-opt:hover, .ac-opt.active { background: var(--bg-hover); }
+.ac-opt .ac-main { font-size: 14px; color: var(--text); }
+.ac-opt .ac-sec { font-size: 12px; color: var(--text-dim); }
 /* In the finding rows the icon sits in its own column and aligns to the top. */
 .finding .ic, .finding .icon .ic { margin-top: 1px; }
 h2 .ic { vertical-align: -2px; margin-right: 2px; }
