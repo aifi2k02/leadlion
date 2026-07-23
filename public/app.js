@@ -420,8 +420,11 @@ const HONEST_OVERRIDE = {
   claimed: { severity: 'warning', text: 'Listing looks thin — likely unmanaged.', pitch: 'A near-empty Google listing usually means nobody is actively managing it — claiming and building it out is the natural first project.' },
 };
 function normFinding(f) {
-  const o = f && !f.ok && HONEST_OVERRIDE[f.factor];
-  return o ? { ...f, ...o } : f;
+  if (!f || f.ok) return f;
+  if (HONEST_OVERRIDE[f.factor]) return { ...f, ...HONEST_OVERRIDE[f.factor] };
+  // Older snapshots assert "the listing looks inactive" (an inference) — soften it.
+  if (/looks inactive/i.test(f.text || '')) return { ...f, text: f.text.replace(/the listing looks inactive/i, 'nothing signals trust to a new customer') };
+  return f;
 }
 
 function allIssues(lead) {
