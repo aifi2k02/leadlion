@@ -2550,7 +2550,7 @@ function openReplyModal(lead, selected = 0, tone = REPLY_TONES[0]) {
 
 // -------- my leads (pipeline)
 let leadsView = 'board'; // 'board' | 'list'
-let leadsFilter = { city: '', country: '', niche: '', temp: '' }; // My Leads segment filter
+let leadsFilter = { city: '', country: '', niche: '', temp: '', noWebsite: false, unclaimed: false }; // My Leads segment filter
 
 // Lead temperature = agency-facing priority, from combinedOpp (same thresholds as
 // the map legend, dashboard tiles and the search "Hot leads" chip). Hot = the
@@ -2642,21 +2642,35 @@ async function viewLeads() {
       && (!leadsFilter.niche || normKey(nicheOf(l)) === leadsFilter.niche);
   });
   const tempCounts = { hot: 0, warm: 0, cold: 0 };
-  for (const l of segLeads) tempCounts[tempOf(l)]++;
-  const leads = segLeads.filter((l) => !leadsFilter.temp || tempOf(l) === leadsFilter.temp);
+  const flagCounts = { noWebsite: 0, unclaimed: 0 };
+  for (const l of segLeads) {
+    tempCounts[tempOf(l)]++;
+    if (!l.website) flagCounts.noWebsite++;
+    if (l.claimed === false) flagCounts.unclaimed++;
+  }
+  const leads = segLeads.filter((l) =>
+    (!leadsFilter.temp || tempOf(l) === leadsFilter.temp) &&
+    (!leadsFilter.noWebsite || !l.website) &&
+    (!leadsFilter.unclaimed || l.claimed === false));
   const showFilters = allLeads.length > 0;
   // Leads saved before the canonical-city change store a bare city (no country).
   // The cleanup button re-geocodes them; only offered to full accounts (needs a key).
   const needsFix = allLeads.filter((l) => l.location && !parseLoc(l.location).country).length;
-  const filtered = leadsFilter.city || leadsFilter.country || leadsFilter.niche || leadsFilter.temp;
+  const filtered = leadsFilter.city || leadsFilter.country || leadsFilter.niche || leadsFilter.temp || leadsFilter.noWebsite || leadsFilter.unclaimed;
   const tempChip = (key, label, color) =>
     `<span class="chip ${leadsFilter.temp === key ? 'on' : ''}" data-temp="${key}"><span class="dot" style="background:${color}"></span>${label} ${tempCounts[key]}</span>`;
+  // Independent toggles (combine with each other and with a temperature) — target
+  // the highest-opportunity leads first. `claimed` is a heuristic (Places has no
+  // claim field), so "Unclaimed" is a targeting hint, not a verified fact.
+  const flagChip = (key, label) =>
+    `<span class="chip ${leadsFilter[key] ? 'on' : ''}" data-flag="${key}">${label} ${flagCounts[key]}</span>`;
   const filterBar = showFilters ? `
     <div class="filter-bar" style="margin:16px 0 6px">
       ${niches.length > 1 ? `<select id="flt-niche" class="flt"><option value="">All niches</option>${niches.map((o) => `<option value="${esc(o.key)}" ${leadsFilter.niche === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>` : ''}
       ${countryOpts.length >= 1 ? `<select id="flt-country" class="flt"><option value="" ${!leadsFilter.country ? 'selected' : ''}>All countries</option>${countryOpts.map((o) => `<option value="${esc(o.key)}" ${leadsFilter.country === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>` : ''}
       ${(cityOpts.length > 1 || (leadsFilter.country && cityOpts.length >= 1)) ? `<select id="flt-city" class="flt"><option value="" ${!leadsFilter.city ? 'selected' : ''}>All cities</option>${cityOpts.map((o) => `<option value="${esc(o.value)}" ${(leadsFilter.city === o.cityKey && leadsFilter.country === o.countryKey) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>` : ''}
       ${tempChip('hot', 'Hot', '#f87171')}${tempChip('warm', 'Warm', '#fbbf24')}${tempChip('cold', 'Cold', '#34d399')}
+      ${flagChip('noWebsite', ic('globe') + ' No website')}${flagChip('unclaimed', 'Unclaimed')}
       <span class="muted" style="font-size:12.5px">${leads.length} of ${allLeads.length} leads</span>
       ${filtered ? `<button class="btn-ghost btn-sm" id="flt-clear">Clear</button>` : ''}
     </div>` : '';
@@ -2705,10 +2719,13 @@ async function viewLeads() {
     else { const [ck, nk] = v.split('|'); leadsFilter.city = ck; leadsFilter.country = nk; }
     viewLeads();
   };
+  document.querySelectorAll('[data-flag]').forEach((c) => {
+    c.onclick = () => { leadsFilter[c.dataset.flag] = !leadsFilter[c.dataset.flag]; viewLeads(); };
+  });
   document.querySelectorAll('[data-temp]').forEach((c) => {
     c.onclick = () => { leadsFilter.temp = leadsFilter.temp === c.dataset.temp ? '' : c.dataset.temp; viewLeads(); };
   });
-  const clearFilter = () => { leadsFilter = { city: '', country: '', niche: '', temp: '' }; viewLeads(); };
+  const clearFilter = () => { leadsFilter = { city: '', country: '', niche: '', temp: '', noWebsite: false, unclaimed: false }; viewLeads(); };
   if ($('#flt-clear')) $('#flt-clear').onclick = clearFilter;
   if ($('#flt-clear-empty')) $('#flt-clear-empty').onclick = clearFilter;
   document.querySelectorAll('.lead-card').forEach((c) => {
