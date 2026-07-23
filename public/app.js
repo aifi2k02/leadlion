@@ -410,11 +410,27 @@ const STATUSES = ['new', 'contacted', 'meeting', 'won', 'lost'];
 const STATUS_LABEL = { new: 'New', contacted: 'Contacted', meeting: 'Meeting', won: 'Won', lost: 'Lost' };
 
 // ---------------------------------------------------------------- outreach
+// Findings are SNAPSHOT onto saved leads, so a scoring.js copy fix only helps new
+// searches. This rewrites findings that assert something we can't verify — at render
+// time — so existing leads read honestly too, in the modal AND in every outreach draft.
+// Keyed by the audit factor. The 'claimed' heuristic can't know claim status (Places
+// exposes none), so the old "UNCLAIMED — anyone could request ownership" becomes the
+// observable "thin/unmanaged listing".
+const HONEST_OVERRIDE = {
+  claimed: { severity: 'warning', text: 'Listing looks thin — likely unmanaged.', pitch: 'A near-empty Google listing usually means nobody is actively managing it — claiming and building it out is the natural first project.' },
+};
+function normFinding(f) {
+  const o = f && !f.ok && HONEST_OVERRIDE[f.factor];
+  return o ? { ...f, ...o } : f;
+}
+
 function allIssues(lead) {
-  // GMB issues first, then website-audit issues, then speed — criticals first
+  // GMB issues first, then website-audit issues, then speed — criticals first.
+  // Normalize BEFORE sorting so a downgraded severity (e.g. claimed) demotes properly.
   const rank = { critical: 0, warning: 1, info: 2 };
-  const gmb = [...(lead.issues || [])].sort((a, b) => rank[a.severity] - rank[b.severity]);
-  const web = [...(lead.webAudit?.issues || [])].sort((a, b) => rank[a.severity] - rank[b.severity]);
+  const norm = (arr) => (arr || []).map(normFinding);
+  const gmb = norm(lead.issues).sort((a, b) => rank[a.severity] - rank[b.severity]);
+  const web = norm(lead.webAudit?.issues).sort((a, b) => rank[a.severity] - rank[b.severity]);
   const speed = lead.pageSpeed?.ok && !lead.pageSpeed.finding.ok ? [lead.pageSpeed.finding] : [];
   return [...gmb, ...web, ...speed];
 }
@@ -2090,7 +2106,7 @@ async function openLeadModal(lead) {
         ${(() => { const sg = serviceSuggestion(l); return sg ? `<div class="banner banner-info mb" style="font-size:13px">${ic('dollar','ic-pitch')} <b>Pitch this first:</b> ${esc(sg.primary)} — ${esc(sg.reason)}${sg.secondary.length ? ` <span class="muted">· also worth offering: ${sg.secondary.map(esc).join(', ')}</span>` : ''}</div>` : ''; })()}
         <h2 style="font-size:15px">GMB audit findings</h2>
         <div class="mb">
-          ${l.findings.map((f) => `
+          ${l.findings.map(normFinding).map((f) => `
             <div class="finding">
               <span class="icon">${f.ok ? sevIcon('ok') : sevIcon(f.severity)}</span>
               <div><div>${esc(f.text)} <span class="muted" style="font-size:12px">(${f.points}/${f.max} pts)</span></div>
@@ -3492,7 +3508,7 @@ async function viewSettings() {
         <div><label>Greeting</label><input id="s-wagreet" value="${esc(s.waGreeting || '')}" placeholder="Hello / Assalam o Alaikum / Hi"></div>
         <div><label>Default country code <span class="muted">(fallback only)</span></label><input id="s-wacc" value="${esc(s.waCountryCode || '')}" placeholder="92 for Pakistan, 1 for US"></div>
       </div>
-      <p class="muted mt" style="font-size:12.5px">The greeting starts every WhatsApp message. The country code is only used as a fallback when Google doesn't provide an international number.</p>
+      <p class="muted mt" style="font-size:12.5px">Keep this to a short greeting like <b>Hello</b> or <b>Assalam o Alaikum</b> — it's added to the <b>start</b> of every message, before the personalised text. Don't paste a whole message here (it can't reference the specific lead, so claims like "strong reviews" would be wrong for a lead that has none). The country code is only a fallback when Google doesn't provide an international number.</p>
     </div>
 
     <div class="card mb">

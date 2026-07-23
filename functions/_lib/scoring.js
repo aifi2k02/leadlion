@@ -38,7 +38,7 @@ const FACTORS = [
         return {
           ok: false,
           severity: 'critical',
-          text: 'No star rating yet — the listing looks inactive.',
+          text: 'No star rating shown yet — nothing signals trust to a new customer.',
           pitch: 'A listing with no rating gets skipped. A simple review campaign fixes this in weeks.',
           service: 'Review generation',
         };
@@ -92,15 +92,19 @@ const FACTORS = [
     max: 10,
     score: (b) => (b.claimed === false ? 0 : 10),
     finding: (b) =>
+      // NB: Places API (New) exposes NO claim-status field, so we must NOT assert
+      // a listing is "unclaimed" (it dies the moment a claimed owner reads it). This
+      // heuristic only fires when website + hours + photos are ALL absent — i.e. an
+      // observably thin, near-empty listing — so we say exactly that, hedged.
       b.claimed === false
         ? {
             ok: false,
-            severity: 'critical',
-            text: 'Listing appears UNCLAIMED — anyone could request ownership.',
-            pitch: 'An unclaimed listing means no control over photos, hours, or reviews. We claim and optimize it as step one.',
+            severity: 'warning',
+            text: 'Listing looks thin — likely unmanaged.',
+            pitch: 'A near-empty Google listing usually means nobody is actively managing it — claiming and building it out is the natural first project.',
             service: 'GMB optimization',
           }
-        : { ok: true, text: 'Listing appears claimed and managed.' },
+        : { ok: true, text: 'Listing has the basics filled in.' },
   },
   {
     key: 'photos',
