@@ -229,3 +229,13 @@ export async function geocodeCity(location, apiKey) {
   if (g.reason === 'zero') return null;
   return await geocodeViaPlaces(location, apiKey);
 }
+
+// The clean, short city name to stamp on a lead — the geocoded canonical city, first
+// segment only ("Los Angeles, CA, USA" -> "Los Angeles"). This is what corrects a
+// mistyped search term ("Los Angls") to the real city Google resolved it to. Falls
+// back to the raw typed string when the term couldn't be geocoded.
+export function cityLabel(geo, fallback = '') {
+  const src = geo && (geo.name || geo.address);
+  const first = src ? String(src).split(',')[0].trim() : '';
+  return first || fallback;
+}

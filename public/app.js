@@ -1067,6 +1067,10 @@ async function runSearch() {
       btn.innerHTML = `<span class="spinner"></span> ${found} found · ${zonesSearched} zones`;
     });
 
+    // Stamp the geocoded canonical city on every lead (deep search already resolved
+    // it in /api/plan), so saved leads store "Los Angeles", not a typed "Los Angls".
+    const canonCity = cityOnly(plan.resolvedCity);
+    if (canonCity) q.results.forEach((r) => { r.location = canonCity; });
     attachCompetitorStats(q.results);
     q.results.sort((a, b) => b.opportunityScore - a.opportunityScore);
     // Zone calls are exact; the ~1 city-geocode call in /api/plan isn't counted
@@ -2318,6 +2322,8 @@ const nicheOf = (l) => l.category || l.keyword || 'Uncategorised';
 // groupCI() dedupes case/whitespace-insensitively and returns one tidy label per
 // group (best-cased variant, lightly title-cased but preserving codes like TX/UK).
 const normKey = (s) => String(s == null ? '' : s).trim().toLowerCase();
+// Short city from a resolved place string ("Los Angeles, CA, USA" -> "Los Angeles").
+const cityOnly = (s) => String(s == null ? '' : s).split(',')[0].trim();
 const smartTitle = (s) => String(s).trim().replace(/\S+/g, (w) => {
   if (w.length <= 3 && w === w.toUpperCase() && /[A-Z]/.test(w)) return w; // codes: TX, UK, UAE
   const rest = w.slice(1);

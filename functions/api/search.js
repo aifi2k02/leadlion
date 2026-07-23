@@ -4,7 +4,7 @@ import {
   getAccount, isExpired, putAccount, resolveKey,
   reserveApiCalls, refundApiCalls, apiRemaining, COST,
 } from '../_lib/accounts.js';
-import { googleSearch } from '../_lib/places.js';
+import { googleSearch, geocodeCity, cityLabel } from '../_lib/places.js';
 
 // POST /api/search { keyword, location, code, googleKey? }
 //
@@ -63,13 +63,16 @@ export async function onRequestPost(context) {
   let businesses;
   let mode;
   let meta = {};
+  let cityName = location; // canonical city stamped on leads (set by geocode below)
   if (canLive) {
     // 'Quick' = a 1-page scout (≤20 results, 1 Google call) for full users too,
     // not just trials. Cheaper and faster than Fast's 3 pages.
     const quick = body.quick === true;
     const cap = resultCap != null ? resultCap : (quick ? 20 : null);
     const maxPages = (resultCap != null || quick) ? 1 : 3;
-    const estimate = maxPages * COST.searchPage;
+    // +COST.geocode: we also geocode the term so the lead stores the real city
+    // ("Los Angls" -> "Los Angeles"), not the raw typed string.
+    const estimate = maxPages * COST.searchPage + COST.geocode;
     const metered = !!(account && !byok); // only our key, on a capped account
 
     if (metered && !(await reserveApiCalls(kv, account, estimate))) {
@@ -84,16 +87,27 @@ export async function onRequestPost(context) {
       const res = await googleSearch(keyword, location, ownerKey, maxPages, cap);
       businesses = res.places;
       calls = res.calls;
+      // Resolve the mistyped/loose term to a canonical city for stamping on leads.
+      // Best-effort: a geocode failure just leaves the typed string in place.
+      try {
+        const geo = await geocodeCity(location, ownerKey);
+        if (geo) cityName = cityLabel(geo, location);
+      } catch { /* keep typed city; the reserved geocode credits stay spent (conservative) */ }
     } catch (err) {
-      // Google failed — hand back everything we reserved.
+      // Google search failed before we geocoded — hand back everything we reserved.
       if (metered) await refundApiCalls(kv, account, estimate);
       return json({ error: `Google Places error: ${err.message}` }, 502);
     }
     mode = 'live';
 
-    // Refund the pages we reserved but never fetched (no nextPageToken).
-    if (metered && calls < estimate) await refundApiCalls(kv, account, estimate - calls);
+    // Refund the search pages we reserved but never fetched; the geocode credit is
+    // always treated as spent (it ran, or we keep it reserved on failure).
+    const usedCredits = calls * COST.searchPage + COST.geocode;
+    if (metered && usedCredits < estimate) await refundApiCalls(kv, account, estimate - usedCredits);
+    // Report search-page calls only. The geocode (~1 call) is intentionally not added
+    // to the informational browser tally, matching the deep-search convention.
     meta.apiCalls = calls;
+    meta.resolvedCity = cityName;
     meta.byok = byok;
 
     // Consume one trial search after a successful live search.
@@ -113,7 +127,7 @@ export async function onRequestPost(context) {
   }
 
   const results = businesses
-    .map((b) => ({ ...b, ...scoreBusiness(b), keyword, location, foundAt: new Date().toISOString() }))
+    .map((b) => ({ ...b, ...scoreBusiness(b), keyword, location: cityName, foundAt: new Date().toISOString() }))
     .sort((a, b) => b.opportunityScore - a.opportunityScore);
 
   return json({ mode, count: results.length, ...meta, results });
