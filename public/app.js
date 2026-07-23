@@ -279,6 +279,37 @@ const store = {
     return leads[i];
   },
 
+  // Apply many patches in a single persist (localStorage rewrite, or one Supabase
+  // upsert of all changed rows) — used by the location cleanup so 200 leads don't
+  // become 200 round-trips. Returns how many rows changed.
+  async bulkUpdate(updates) { // updates: [{ id, patch }]
+    if (dbActive()) {
+      const leads = await this.list();
+      const byId = new Map(leads.map((l) => [l.id, l]));
+      const rows = [];
+      for (const { id, patch } of updates) {
+        const lead = byId.get(id);
+        if (!lead) continue;
+        const updated = { ...lead, ...patch };
+        rows.push({ id, status: updated.status, notes: updated.notes, data: updated });
+      }
+      if (rows.length) {
+        const { error } = await supabase.from('leads').upsert(rows);
+        if (error) { toast('Supabase update failed: ' + error.message); return 0; }
+      }
+      return rows.length;
+    }
+    const leads = this.local();
+    const patchById = new Map(updates.map((u) => [u.id, u.patch]));
+    let n = 0;
+    for (let i = 0; i < leads.length; i++) {
+      const p = patchById.get(leads[i].id);
+      if (p) { leads[i] = { ...leads[i], ...p }; n++; }
+    }
+    this.writeLocal(leads);
+    return n;
+  },
+
   async remove(id) {
     if (dbActive()) { await supabase.from('leads').delete().eq('id', id); return; }
     this.writeLocal(this.local().filter((l) => l.id !== id));
@@ -2472,6 +2503,9 @@ async function viewLeads() {
   for (const l of segLeads) tempCounts[tempOf(l)]++;
   const leads = segLeads.filter((l) => !leadsFilter.temp || tempOf(l) === leadsFilter.temp);
   const showFilters = allLeads.length > 0;
+  // Leads saved before the canonical-city change store a bare city (no country).
+  // The cleanup button re-geocodes them; only offered to full accounts (needs a key).
+  const needsFix = allLeads.filter((l) => l.location && !parseLoc(l.location).country).length;
   const filtered = leadsFilter.city || leadsFilter.country || leadsFilter.niche || leadsFilter.temp;
   const tempChip = (key, label, color) =>
     `<span class="chip ${leadsFilter.temp === key ? 'on' : ''}" data-temp="${key}"><span class="dot" style="background:${color}"></span>${label} ${tempCounts[key]}</span>`;
@@ -2492,6 +2526,7 @@ async function viewLeads() {
           <button class="seg-btn ${leadsView === 'board' ? 'on' : ''}" data-view="board">▦ Board</button>
           <button class="seg-btn ${leadsView === 'list' ? 'on' : ''}" data-view="list">☰ List</button>
         </div>` : ''}
+        ${(feat().deep && needsFix) ? `<button class="btn-ghost btn-sm" id="loc-cleanup" title="Re-resolve older leads' locations to City, Country">${ic('globe')} Fix ${needsFix} location${needsFix === 1 ? '' : 's'}</button>` : ''}
         ${feat().download ? `<button class="btn-ghost btn-sm" id="csv-all" ${leads.length ? '' : 'disabled'}>${ic('download')} Export CSV</button>` : ''}
       </div>
     </div>
@@ -2548,6 +2583,58 @@ async function viewLeads() {
   if (leadsView === 'list') { bindLeadRows(leads); wireSelection(viewLeads); }
   const csvBtn = $('#csv-all');
   if (csvBtn) csvBtn.onclick = () => exportCsv(leads, 'leadlion-pipeline');
+  if ($('#loc-cleanup')) $('#loc-cleanup').onclick = cleanupLocations;
+}
+
+// One-time maintenance: re-geocode leads saved before the canonical-city change
+// (bare "Riyadh", typo'd "Los Angls") to "City, Country". Geocodes each UNIQUE
+// location once — not per lead — then writes every changed lead in a single persist.
+async function cleanupLocations() {
+  const all = await store.list();
+  const candidates = all.filter((l) => l.location && !parseLoc(l.location).country);
+  if (!candidates.length) return toast('All saved locations already include a country.');
+
+  // Unique original strings to resolve; keep the first-seen casing for the API call.
+  const origByKey = new Map();
+  for (const l of candidates) { const k = normKey(l.location); if (!origByKey.has(k)) origByKey.set(k, l.location.trim()); }
+  const uniq = [...origByKey.keys()];
+  if (!confirm(`Re-resolve ${uniq.length} unique location${uniq.length === 1 ? '' : 's'} (${candidates.length} lead${candidates.length === 1 ? '' : 's'}) to "City, Country"?\n\nUses about ${uniq.length} Google call${uniq.length === 1 ? '' : 's'}.`)) return;
+
+  const btn = $('#loc-cleanup');
+  if (btn) btn.disabled = true;
+  const resolved = new Map(); // normKey -> "City, Country"
+  const queue = uniq.slice();
+  let done = 0, failed = 0, stop = false;
+
+  const worker = async () => {
+    while (queue.length && !stop) {
+      const k = queue.shift();
+      try {
+        const res = await fetch('/api/geocode', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: spendBody({ location: origByKey.get(k) }),
+        });
+        const data = await res.json();
+        if (res.status === 402 || data.outOfCredits) { stop = true; toast('Ran out of API credits — stopping.'); break; }
+        // Only accept a result that actually gained a country.
+        if (data.ok && data.label && parseLoc(data.label).country) resolved.set(k, data.label);
+        else failed++;
+      } catch { failed++; }
+      done++;
+      if (btn) btn.innerHTML = `<span class="spinner"></span> ${done}/${uniq.length}`;
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]); // small concurrency
+
+  const updates = [];
+  for (const l of candidates) {
+    const label = resolved.get(normKey(l.location));
+    if (label && label !== l.location) updates.push({ id: l.id, patch: { location: label } });
+  }
+  if (done) recordUsage({ apiCalls: done }); // these ARE real geocode calls (unlike the incidental one during a search)
+  const n = updates.length ? await store.bulkUpdate(updates) : 0;
+  toast(`Updated ${n} lead${n === 1 ? '' : 's'} across ${resolved.size} location${resolved.size === 1 ? '' : 's'}${failed ? ` · ${failed} couldn't be resolved` : ''}.`);
+  viewLeads();
 }
 
 // Kanban drop targets: each column accepts a dragged card and re-stages the lead.
