@@ -2377,7 +2377,7 @@ function openReplyModal(lead, selected = 0, tone = REPLY_TONES[0]) {
 
 // -------- my leads (pipeline)
 let leadsView = 'board'; // 'board' | 'list'
-let leadsFilter = { location: '', niche: '', temp: '' }; // My Leads segment filter
+let leadsFilter = { city: '', country: '', niche: '', temp: '' }; // My Leads segment filter
 
 // Lead temperature = agency-facing priority, from combinedOpp (same thresholds as
 // the map legend, dashboard tiles and the search "Hot leads" chip). Hot = the
@@ -2396,6 +2396,14 @@ const nicheOf = (l) => l.category || l.keyword || 'Uncategorised';
 // groupCI() dedupes case/whitespace-insensitively and returns one tidy label per
 // group (best-cased variant, lightly title-cased but preserving codes like TX/UK).
 const normKey = (s) => String(s == null ? '' : s).trim().toLowerCase();
+// Split a stored "City, Country" location into parts. Old leads may be bare "City"
+// (no country) — country comes back '' then.
+const parseLoc = (loc) => {
+  const parts = String(loc == null ? '' : loc).split(',').map((s) => s.trim()).filter(Boolean);
+  if (!parts.length) return { city: '', country: '' };
+  if (parts.length === 1) return { city: parts[0], country: '' };
+  return { city: parts[0], country: parts[parts.length - 1] };
+};
 const smartTitle = (s) => String(s).trim().replace(/\S+/g, (w) => {
   if (w.length <= 3 && w === w.toUpperCase() && /[A-Z]/.test(w)) return w; // codes: TX, UK, UAE
   const rest = w.slice(1);
@@ -2423,25 +2431,55 @@ async function viewLeads() {
   const allLeads = await store.list();
   // Segment the pipeline by location + niche — an agency running many cities/niches
   // accumulates hundreds of leads here; the filter makes that pile usable.
-  const locations = groupCI(allLeads.map((l) => l.location).filter(Boolean));
   const niches = groupCI(allLeads.map(nicheOf));
-  // Segment by location + niche first; temperature counts are computed within that
-  // segment (so "Hot 4" means 4 hot leads in the current niche/location view). Match
-  // on normalized keys so "Riyadh" and "riyadh" are one group (see groupCI).
-  const segLeads = allLeads.filter((l) =>
-    (!leadsFilter.location || normKey(l.location) === leadsFilter.location) &&
-    (!leadsFilter.niche || normKey(nicheOf(l)) === leadsFilter.niche));
+  // Linked Country + City filters, both derived from the stored "City, Country".
+  // Distinct (city, country) pairs; `spread` tracks how many countries share a city
+  // name (to disambiguate e.g. two "Hyderabad"s when no country is picked).
+  const pairMap = new Map();
+  const spread = {};
+  for (const l of allLeads) {
+    const p = parseLoc(l.location);
+    if (!p.city) continue;
+    const ck = normKey(p.city), nk = normKey(p.country);
+    (spread[ck] = spread[ck] || new Set()).add(nk);
+    const id = ck + '|' + nk;
+    if (!pairMap.has(id)) pairMap.set(id, { cityKey: ck, cityLabel: smartTitle(p.city), countryKey: nk, countryLabel: p.country ? smartTitle(p.country) : '' });
+  }
+  const pairs = [...pairMap.values()];
+  const countryMap = new Map();
+  for (const p of pairs) if (p.countryKey) countryMap.set(p.countryKey, p.countryLabel);
+  const countryOpts = [...countryMap.entries()].map(([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label));
+  // City options honour the selected country; when none is picked, a duplicated city
+  // name gets its country appended so the two are distinguishable.
+  const cityMap = new Map();
+  for (const p of pairs) {
+    if (leadsFilter.country && p.countryKey !== leadsFilter.country) continue;
+    const value = p.cityKey + '|' + p.countryKey;
+    if (cityMap.has(value)) continue;
+    const dup = !leadsFilter.country && spread[p.cityKey] && spread[p.cityKey].size > 1 && p.countryLabel;
+    cityMap.set(value, { value, cityKey: p.cityKey, countryKey: p.countryKey, label: dup ? `${p.cityLabel} — ${p.countryLabel}` : p.cityLabel });
+  }
+  const cityOpts = [...cityMap.values()].sort((a, b) => a.label.localeCompare(b.label));
+  // Segment by country + city + niche; temperature counts are computed within that
+  // segment (so "Hot 4" means 4 hot leads in the current view).
+  const segLeads = allLeads.filter((l) => {
+    const { city, country } = parseLoc(l.location);
+    return (!leadsFilter.country || normKey(country) === leadsFilter.country)
+      && (!leadsFilter.city || normKey(city) === leadsFilter.city)
+      && (!leadsFilter.niche || normKey(nicheOf(l)) === leadsFilter.niche);
+  });
   const tempCounts = { hot: 0, warm: 0, cold: 0 };
   for (const l of segLeads) tempCounts[tempOf(l)]++;
   const leads = segLeads.filter((l) => !leadsFilter.temp || tempOf(l) === leadsFilter.temp);
   const showFilters = allLeads.length > 0;
-  const filtered = leadsFilter.location || leadsFilter.niche || leadsFilter.temp;
+  const filtered = leadsFilter.city || leadsFilter.country || leadsFilter.niche || leadsFilter.temp;
   const tempChip = (key, label, color) =>
     `<span class="chip ${leadsFilter.temp === key ? 'on' : ''}" data-temp="${key}"><span class="dot" style="background:${color}"></span>${label} ${tempCounts[key]}</span>`;
   const filterBar = showFilters ? `
     <div class="filter-bar" style="margin:16px 0 6px">
       ${niches.length > 1 ? `<select id="flt-niche" class="flt"><option value="">All niches</option>${niches.map((o) => `<option value="${esc(o.key)}" ${leadsFilter.niche === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>` : ''}
-      ${locations.length > 1 ? `<select id="flt-loc" class="flt"><option value="">All locations</option>${locations.map((o) => `<option value="${esc(o.key)}" ${leadsFilter.location === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>` : ''}
+      ${countryOpts.length >= 1 ? `<select id="flt-country" class="flt"><option value="" ${!leadsFilter.country ? 'selected' : ''}>All countries</option>${countryOpts.map((o) => `<option value="${esc(o.key)}" ${leadsFilter.country === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>` : ''}
+      ${(cityOpts.length > 1 || (leadsFilter.country && cityOpts.length >= 1)) ? `<select id="flt-city" class="flt"><option value="" ${!leadsFilter.city ? 'selected' : ''}>All cities</option>${cityOpts.map((o) => `<option value="${esc(o.value)}" ${(leadsFilter.city === o.cityKey && leadsFilter.country === o.countryKey) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>` : ''}
       ${tempChip('hot', 'Hot', '#f87171')}${tempChip('warm', 'Warm', '#fbbf24')}${tempChip('cold', 'Cold', '#34d399')}
       <span class="muted" style="font-size:12.5px">${leads.length} of ${allLeads.length} leads</span>
       ${filtered ? `<button class="btn-ghost btn-sm" id="flt-clear">Clear</button>` : ''}
@@ -2481,11 +2519,19 @@ async function viewLeads() {
     b.onclick = () => { leadsView = b.dataset.view; viewLeads(); };
   });
   if ($('#flt-niche')) $('#flt-niche').onchange = (e) => { leadsFilter.niche = e.target.value; viewLeads(); };
-  if ($('#flt-loc')) $('#flt-loc').onchange = (e) => { leadsFilter.location = e.target.value; viewLeads(); };
+  // Pick a country → narrow cities to it (and reset the city choice).
+  if ($('#flt-country')) $('#flt-country').onchange = (e) => { leadsFilter.country = e.target.value; leadsFilter.city = ''; viewLeads(); };
+  // Pick a city → auto-set its country (the option value carries "cityKey|countryKey").
+  if ($('#flt-city')) $('#flt-city').onchange = (e) => {
+    const v = e.target.value;
+    if (!v) { leadsFilter.city = ''; } // "All cities" — keep any country filter
+    else { const [ck, nk] = v.split('|'); leadsFilter.city = ck; leadsFilter.country = nk; }
+    viewLeads();
+  };
   document.querySelectorAll('[data-temp]').forEach((c) => {
     c.onclick = () => { leadsFilter.temp = leadsFilter.temp === c.dataset.temp ? '' : c.dataset.temp; viewLeads(); };
   });
-  const clearFilter = () => { leadsFilter = { location: '', niche: '', temp: '' }; viewLeads(); };
+  const clearFilter = () => { leadsFilter = { city: '', country: '', niche: '', temp: '' }; viewLeads(); };
   if ($('#flt-clear')) $('#flt-clear').onclick = clearFilter;
   if ($('#flt-clear-empty')) $('#flt-clear-empty').onclick = clearFilter;
   document.querySelectorAll('.lead-card').forEach((c) => {
