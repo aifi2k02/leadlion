@@ -975,6 +975,7 @@ function renderUrlAudit(a, speed, heading) {
   ];
   const bad = findings.filter((f) => !f.ok);
   const emails = a.emails || [];
+  const foundEmail = emails[0] || '';
   $('#results').innerHTML = `
     <div class="card mt">
       <div class="flex spread">
@@ -999,12 +1000,26 @@ function renderUrlAudit(a, speed, heading) {
             ${f.pitch ? `<div class="pitch">${ic('dollar','ic-pitch')} ${esc(f.pitch)}</div>` : ''}</div>
           </div>`).join('')}
       </div>
-      <div class="flex mt">
+      <div class="flex mt" style="flex-wrap:wrap">
+        <button class="btn-wa" id="au-wa">${ic('chat')} Send on WhatsApp</button>
+        <button class="btn" id="au-email">${ic('mail')} Email${foundEmail ? ` — to ${esc(foundEmail)}` : ' (add recipient)'}</button>
         <button class="btn-ghost btn-sm" id="au-copy">${ic('save')} Copy as text</button>
         <button class="btn-ghost btn-sm" id="au-print">${ic('printer')} Print</button>
       </div>
+      ${foundEmail ? '' : `<p class="muted" style="font-size:12px;margin-top:6px">No contact email was found on this site — your mail app will open with the message, just add the address. WhatsApp will ask you to pick the contact.</p>`}
     </div>`;
+
+  // A URL audit has no Google listing, so there's no phone number: waLink falls back
+  // to an empty number, which opens WhatsApp and lets the user pick the contact.
+  const pseudoLead = { name: heading, website: a.finalUrl || a.url, phone: '', webAudit: { emails: a.emails || [] } };
+  const msg = urlAuditMessages(a, speed, heading, bad);
+
   $('#au-print').onclick = () => window.print();
+  $('#au-wa').onclick = () => { window.open(waLink(pseudoLead, msg.whatsapp), '_blank'); toast('Opened WhatsApp — pick the contact'); };
+  $('#au-email').onclick = () => {
+    window.location.href = mailtoLink(pseudoLead, msg.email);
+    toast(foundEmail ? `Opening email to ${foundEmail}` : 'Opening email — add the recipient');
+  };
   $('#au-copy').onclick = () => {
     const lines = [`WEBSITE AUDIT — ${heading}`, `${a.finalUrl || a.url}`, `Score ${a.websiteScore}/100 (Grade ${a.grade})`];
     if (speed?.ok) lines.push(`Google mobile speed: ${speed.score}/100 (Grade ${speed.grade})`);
@@ -1013,6 +1028,49 @@ function renderUrlAudit(a, speed, heading) {
     navigator.clipboard.writeText(lines.join('\n'));
     toast('Audit copied');
   };
+}
+
+// Outreach copy for a URL-only audit. Unlike buildOutreach() this has no Google
+// listing to draw on — everything here comes from the website audit itself.
+function urlAuditMessages(a, speed, heading, bad) {
+  const s = getSettings();
+  const agency = s.agencyName || 'Your Agency';
+  const greet = s.waGreeting || 'Hello';
+  const site = String(a.finalUrl || a.url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const top = bad.map((f) => f.text);
+  const wIssues = top.slice(0, 2).map((t) => `• ${t}`).join('\n');
+  const eIssues = top.slice(0, 4).map((t) => `  • ${t}`).join('\n');
+  const scoreLine = `For reference, the site scores ${a.websiteScore}/100 on our audit${speed?.ok ? `, and Google rates its mobile speed ${speed.score}/100` : ''}.`;
+  const clean = !top.length;
+
+  const whatsapp = clean
+    ? `${greet}! I ran a quick check on ${heading}'s website (${site}) — it's in good shape, which is rarer than you'd think. I put the full audit together anyway; would it be okay if I share it?\n\n${agency}`
+    : `${greet}! I ran a quick check on ${heading}'s website (${site}).
+
+A couple of things stood out that may be costing you customers:
+${wIssues}
+
+Both are quick to fix. I've put together a *free* audit report for you — no cost, no obligation. Would it be okay if I share it?
+
+${agency}`;
+
+  const email = `Subject: Quick note on ${heading}'s website
+
+Hi there,
+
+I took a look at ${site} and ran a quick audit.${clean ? ' The good news: it came back clean — which is rarer than you\'d think.' : ' A few things stood out that are likely costing you customers:'}
+
+${clean ? '' : eIssues + '\n'}
+${scoreLine}
+
+${clean ? 'Happy to send the full breakdown over so you have it on record.' : 'These are all fixable — most within a couple of weeks. I\'m happy to send the full breakdown over.'}
+
+Would you be open to a 10-minute call this week?
+
+Best,
+${agency}${s.agencyPhone ? '\n' + s.agencyPhone : ''}${s.agencyEmail ? '\n' + s.agencyEmail : ''}`;
+
+  return { whatsapp, email };
 }
 
 // City autocomplete on the Location box. Suggestions come from Google Places
