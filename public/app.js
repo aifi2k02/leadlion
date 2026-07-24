@@ -1445,12 +1445,24 @@ function oppCell(r) {
   return `${scorePill(combined)}${boosted ? '<div class="sub" style="color:var(--accent);font-size:11px">+web</div>' : ''}`;
 }
 
+// Email found on the business's own site during the website audit. Shown so you can
+// see at a glance which leads are reachable by email (run the audit to populate it).
+function emailCell(r) {
+  const e = leadEmail(r);
+  if (!e) {
+    return r.website
+      ? '<span class="muted" style="font-size:12px" title="Run the website audit on this lead to look for an email.">—</span>'
+      : '<span class="muted" style="font-size:12px" title="No website on this listing, so there is no email to find.">—</span>';
+  }
+  return `<span title="${esc(e)}" style="display:inline-block;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;font-size:12.5px">${esc(e)}</span>`;
+}
+
 function leadsTable(rows, opts = {}) {
   if (!rows.length) return '<div class="card muted">Nothing here yet.</div>';
   return `<table>
     <thead><tr>
       ${opts.selectable ? '<th style="width:30px"><input type="checkbox" class="sel-all" title="Select all"></th>' : ''}
-      <th>Opportunity</th><th>Business</th><th>Rating</th><th>Reviews</th><th>Website</th><th>Grade</th>${opts.saveBtn ? '<th></th>' : '<th>Status</th>'}
+      <th>Opportunity</th><th>Business</th><th>Rating</th><th>Reviews</th><th>Website</th><th>Email</th><th>Grade</th>${opts.saveBtn ? '<th></th>' : '<th>Status</th>'}
     </tr></thead>
     <tbody>
       ${rows.map((r, i) => `
@@ -1461,6 +1473,7 @@ function leadsTable(rows, opts = {}) {
           <td>${r.rating ? r.rating + '★' : '<span class="badge badge-red">none</span>'}</td>
           <td>${r.reviewCount ?? 0}</td>
           <td>${webCell(r)}</td>
+          <td>${emailCell(r)}</td>
           <td>${gradeBadge(r.grade)}</td>
           ${opts.saveBtn
             ? `<td>${opts.saved?.has(r.placeId) ? '<span class="badge badge-green">saved</span>' : `<button class="btn-sm save-one" data-i="${i}">Save</button>`}</td>`
@@ -2374,7 +2387,7 @@ function openOutreachModal(lead) {
         <textarea class="script" id="script-wa" rows="9">${esc(whatsapp)}</textarea>
         <button class="btn-wa mt" id="wa-send" style="width:100%">${ic('chat')} Open in WhatsApp with this message</button>
 
-        ${lead.webAudit?.emails?.length ? `<div class="banner banner-info mt">${ic('mail')} Send email to: <b>${lead.webAudit.emails.map(esc).join(', ')}</b> <span class="muted">(found on their website)</span></div>` : ''}
+        ${lead.webAudit?.emails?.length ? `<div class="banner banner-info mt">${ic('mail')} Send email to: <b>${lead.webAudit.emails.map(esc).join(', ')}</b> <span class="muted">(found on their website)</span> <span id="email-verify" style="font-size:12px"></span></div>` : ''}
         <div class="flex spread mt"><label>Cold email</label><div class="flex" style="gap:6px">
           <select id="email-angle" class="flt" style="width:auto;min-width:0;padding:5px 9px;font-size:12.5px" title="Email angle — auto-picked from whether they have a website">
             ${Object.entries(ANGLE_LABEL).map(([k, v]) => `<option value="${k}" ${outreachAngle(lead) === k ? 'selected' : ''}>Angle: ${esc(v)}</option>`).join('')}
@@ -2415,6 +2428,29 @@ function openOutreachModal(lead) {
     toast(leadEmail(lead) ? `Opening email to ${leadEmail(lead)}` : 'Opening email — add the recipient');
     markContacted();
   };
+  // Check the found address is worth sending to (free DNS/MX lookup — no Google
+  // call). We verify the DOMAIN's mail setup, not the mailbox, and say so.
+  const vEl = $('#email-verify');
+  const vAddr = leadEmail(lead);
+  if (vEl && vAddr) {
+    vEl.textContent = '· checking…';
+    vEl.className = 'muted';
+    fetch('/api/verifyemail', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: vAddr, code: accessCode() }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        const tone = { deliverable: 'ic-ok', risky: 'ic-warning', undeliverable: 'ic-bad', invalid: 'ic-bad' }[d.status] || 'muted';
+        const mark = d.status === 'deliverable' ? '✓' : d.status === 'unknown' ? '' : '⚠';
+        vEl.className = tone === 'muted' ? 'muted' : '';
+        vEl.style.color = { 'ic-ok': 'var(--green, #34d399)', 'ic-warning': '#fbbf24', 'ic-bad': '#f87171' }[tone] || '';
+        vEl.textContent = `· ${mark} ${d.label || ''}`.trim();
+        vEl.title = 'We check the domain\'s mail server, not the individual mailbox.';
+      })
+      .catch(() => { vEl.textContent = ''; });
+  }
+
   // AI cold-email: rewrite the email box around this lead's real pain points.
   const aiBtn = $('#email-ai');
   if (aiBtn) aiBtn.onclick = async () => {
@@ -2582,7 +2618,7 @@ function openReplyModal(lead, selected = 0, tone = REPLY_TONES[0]) {
 
 // -------- my leads (pipeline)
 let leadsView = 'board'; // 'board' | 'list'
-let leadsFilter = { city: '', country: '', niche: '', temp: '', noWebsite: false, unclaimed: false }; // My Leads segment filter
+let leadsFilter = { city: '', country: '', niche: '', temp: '', noWebsite: false, unclaimed: false, hasEmail: false }; // My Leads segment filter
 
 // Lead temperature = agency-facing priority, from combinedOpp (same thresholds as
 // the map legend, dashboard tiles and the search "Hot leads" chip). Hot = the
@@ -2674,21 +2710,23 @@ async function viewLeads() {
       && (!leadsFilter.niche || normKey(nicheOf(l)) === leadsFilter.niche);
   });
   const tempCounts = { hot: 0, warm: 0, cold: 0 };
-  const flagCounts = { noWebsite: 0, unclaimed: 0 };
+  const flagCounts = { noWebsite: 0, unclaimed: 0, hasEmail: 0 };
   for (const l of segLeads) {
     tempCounts[tempOf(l)]++;
     if (!l.website) flagCounts.noWebsite++;
     if (l.claimed === false) flagCounts.unclaimed++;
+    if (leadEmail(l)) flagCounts.hasEmail++;
   }
   const leads = segLeads.filter((l) =>
     (!leadsFilter.temp || tempOf(l) === leadsFilter.temp) &&
     (!leadsFilter.noWebsite || !l.website) &&
-    (!leadsFilter.unclaimed || l.claimed === false));
+    (!leadsFilter.unclaimed || l.claimed === false) &&
+    (!leadsFilter.hasEmail || !!leadEmail(l)));
   const showFilters = allLeads.length > 0;
   // Leads saved before the canonical-city change store a bare city (no country).
   // The cleanup button re-geocodes them; only offered to full accounts (needs a key).
   const needsFix = allLeads.filter((l) => l.location && !parseLoc(l.location).country).length;
-  const filtered = leadsFilter.city || leadsFilter.country || leadsFilter.niche || leadsFilter.temp || leadsFilter.noWebsite || leadsFilter.unclaimed;
+  const filtered = leadsFilter.city || leadsFilter.country || leadsFilter.niche || leadsFilter.temp || leadsFilter.noWebsite || leadsFilter.unclaimed || leadsFilter.hasEmail;
   const tempChip = (key, label, color) =>
     `<span class="chip ${leadsFilter.temp === key ? 'on' : ''}" data-temp="${key}"><span class="dot" style="background:${color}"></span>${label} ${tempCounts[key]}</span>`;
   // Independent toggles (combine with each other and with a temperature) — target
@@ -2702,7 +2740,7 @@ async function viewLeads() {
       ${countryOpts.length >= 1 ? `<select id="flt-country" class="flt"><option value="" ${!leadsFilter.country ? 'selected' : ''}>All countries</option>${countryOpts.map((o) => `<option value="${esc(o.key)}" ${leadsFilter.country === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>` : ''}
       ${(cityOpts.length > 1 || (leadsFilter.country && cityOpts.length >= 1)) ? `<select id="flt-city" class="flt"><option value="" ${!leadsFilter.city ? 'selected' : ''}>All cities</option>${cityOpts.map((o) => `<option value="${esc(o.value)}" ${(leadsFilter.city === o.cityKey && leadsFilter.country === o.countryKey) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>` : ''}
       ${tempChip('hot', 'Hot', '#f87171')}${tempChip('warm', 'Warm', '#fbbf24')}${tempChip('cold', 'Cold', '#34d399')}
-      ${flagChip('noWebsite', ic('globe') + ' No website')}${flagChip('unclaimed', 'Unclaimed')}
+      ${flagChip('noWebsite', ic('globe') + ' No website')}${flagChip('unclaimed', 'Unclaimed')}${flagChip('hasEmail', ic('mail') + ' Has email')}
       <span class="muted" style="font-size:12.5px">${leads.length} of ${allLeads.length} leads</span>
       ${filtered ? `<button class="btn-ghost btn-sm" id="flt-clear">Clear</button>` : ''}
     </div>` : '';
@@ -2757,7 +2795,7 @@ async function viewLeads() {
   document.querySelectorAll('[data-temp]').forEach((c) => {
     c.onclick = () => { leadsFilter.temp = leadsFilter.temp === c.dataset.temp ? '' : c.dataset.temp; viewLeads(); };
   });
-  const clearFilter = () => { leadsFilter = { city: '', country: '', niche: '', temp: '', noWebsite: false, unclaimed: false }; viewLeads(); };
+  const clearFilter = () => { leadsFilter = { city: '', country: '', niche: '', temp: '', noWebsite: false, unclaimed: false, hasEmail: false }; viewLeads(); };
   if ($('#flt-clear')) $('#flt-clear').onclick = clearFilter;
   if ($('#flt-clear-empty')) $('#flt-clear-empty').onclick = clearFilter;
   document.querySelectorAll('.lead-card').forEach((c) => {
@@ -3617,9 +3655,12 @@ async function viewSettings() {
 
 // -------- csv
 function exportCsv(rows, name) {
-  const cols = ['name', 'address', 'phone', 'website', 'rating', 'reviewCount', 'opportunityScore', 'grade', 'status', 'keyword', 'location'];
+  // `email` is derived (it lives at webAudit.emails[0], not on the lead itself) —
+  // it's the column that makes the export usable for a mail merge.
+  const cols = ['name', 'email', 'address', 'phone', 'website', 'rating', 'reviewCount', 'opportunityScore', 'grade', 'status', 'keyword', 'location'];
+  const val = (r, c) => (c === 'email' ? leadEmail(r) : r[c]);
   const csvCell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const csv = [cols.join(','), ...rows.map((r) => cols.map((c) => csvCell(r[c])).join(','))].join('\n');
+  const csv = [cols.join(','), ...rows.map((r) => cols.map((c) => csvCell(val(r, c))).join(','))].join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   a.download = `${name.replace(/[^a-z0-9-]+/gi, '-').toLowerCase()}.csv`;
