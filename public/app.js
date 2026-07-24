@@ -659,6 +659,77 @@ function serviceSuggestion(lead) {
 const outreachAngle = (lead) => lead.website ? 'grow' : 'get-online';
 const ANGLE_LABEL = { 'get-online': 'Get online (no website)', 'grow': 'Grow & optimise' };
 
+// -------- translation (Workers AI m2m100, ~100 languages, cached server-side)
+// `v` is the English language name the model expects (verified working). Ordered
+// roughly by region so the list scans; RTL languages flagged for text direction.
+const LANGS = [
+  { v: 'spanish', label: 'Español (Spanish)' }, { v: 'french', label: 'Français (French)' },
+  { v: 'portuguese', label: 'Português (Portuguese)' }, { v: 'german', label: 'Deutsch (German)' },
+  { v: 'italian', label: 'Italiano (Italian)' }, { v: 'dutch', label: 'Nederlands (Dutch)' },
+  { v: 'russian', label: 'Русский (Russian)' }, { v: 'ukrainian', label: 'Українська (Ukrainian)' },
+  { v: 'polish', label: 'Polski (Polish)' }, { v: 'romanian', label: 'Română (Romanian)' },
+  { v: 'greek', label: 'Ελληνικά (Greek)' }, { v: 'czech', label: 'Čeština (Czech)' },
+  { v: 'hungarian', label: 'Magyar (Hungarian)' }, { v: 'swedish', label: 'Svenska (Swedish)' },
+  { v: 'norwegian', label: 'Norsk (Norwegian)' }, { v: 'danish', label: 'Dansk (Danish)' },
+  { v: 'finnish', label: 'Suomi (Finnish)' }, { v: 'turkish', label: 'Türkçe (Turkish)' },
+  { v: 'arabic', label: 'العربية (Arabic)', rtl: true }, { v: 'hebrew', label: 'עברית (Hebrew)', rtl: true },
+  { v: 'persian', label: 'فارسی (Persian)', rtl: true }, { v: 'pashto', label: 'پښتو (Pashto)', rtl: true },
+  { v: 'urdu', label: 'اردو (Urdu)', rtl: true }, { v: 'hindi', label: 'हिन्दी (Hindi)' },
+  { v: 'bengali', label: 'বাংলা (Bengali)' }, { v: 'punjabi', label: 'ਪੰਜਾਬੀ (Punjabi)' },
+  { v: 'gujarati', label: 'ગુજરાતી (Gujarati)' }, { v: 'marathi', label: 'मराठी (Marathi)' },
+  { v: 'tamil', label: 'தமிழ் (Tamil)' }, { v: 'telugu', label: 'తెలుగు (Telugu)' },
+  { v: 'chinese', label: '中文 (Chinese)' }, { v: 'japanese', label: '日本語 (Japanese)' },
+  { v: 'korean', label: '한국어 (Korean)' }, { v: 'vietnamese', label: 'Tiếng Việt (Vietnamese)' },
+  { v: 'thai', label: 'ไทย (Thai)' }, { v: 'indonesian', label: 'Bahasa Indonesia' },
+  { v: 'malay', label: 'Bahasa Melayu (Malay)' }, { v: 'tagalog', label: 'Tagalog (Filipino)' },
+  { v: 'swahili', label: 'Kiswahili (Swahili)' }, { v: 'amharic', label: 'አማርኛ (Amharic)' },
+  { v: 'yoruba', label: 'Yorùbá' }, { v: 'hausa', label: 'Hausa' }, { v: 'somali', label: 'Soomaali (Somali)' },
+];
+const LANG_BY_V = Object.fromEntries(LANGS.map((l) => [l.v, l]));
+const langOptions = (sel) => `<option value="en" ${!sel ? 'selected' : ''}>English (original)</option>` +
+  LANGS.map((l) => `<option value="${l.v}" ${sel === l.v ? 'selected' : ''}>${esc(l.label)}</option>`).join('');
+
+// Batch-translate strings. Fails soft — returns the originals on any error, because
+// a translation must never break the copy it's translating.
+async function translateStrings(texts, lang) {
+  if (!lang || lang === 'en' || !texts.length) return texts;
+  try {
+    const res = await fetch('/api/translate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: accessCode(), to: lang, texts }),
+    });
+    const data = await res.json();
+    if (data.outOfCredits) { toast(data.error || 'Out of AI credits.'); return texts; }
+    return Array.isArray(data.translations) ? data.translations : texts;
+  } catch { return texts; }
+}
+
+// Translate a multi-line message line by line — short strings keep proper nouns
+// intact and avoid the model truncating a long block, and blank lines / bullets /
+// layout survive. Guards the two things that DO break: a name alone on a line (the
+// signature) mangles, so we skip single-token and known-name lines; and the mail
+// "Subject:" keyword must stay literal (mailtoLink parses it), so only its text is
+// translated. `protect` = strings never to translate (agency + business names).
+async function translateText(text, lang, protect = []) {
+  if (!lang || lang === 'en') return text;
+  const prot = new Set(protect.map((p) => String(p == null ? '' : p).trim()).filter(Boolean));
+  const lines = String(text).split('\n');
+  const jobs = [], payload = []; // jobs: { i, prefix }
+  lines.forEach((ln, i) => {
+    let s = ln, prefix = '';
+    const m = /^(\s*Subject:\s*)(.+)$/i.exec(ln);
+    if (m) { prefix = m[1]; s = m[2]; }
+    const t = s.trim();
+    if (!t || prot.has(t) || !/\s/.test(t)) return; // skip blanks, known names, single tokens (names/URLs)
+    jobs.push({ i, prefix }); payload.push(s);
+  });
+  if (!payload.length) return text;
+  const tr = await translateStrings(payload, lang);
+  const out = lines.slice();
+  jobs.forEach((j, k) => { out[j.i] = j.prefix + (tr[k] ?? out[j.i]); });
+  return out.join('\n');
+}
+
 // Compact lead payload for the AI copy endpoint (/api/copy) — findings only, no
 // Google call. Shared by the cold-email and GBP-description generators.
 function copyLeadPayload(lead) {
@@ -2643,6 +2714,11 @@ function openOutreachModal(lead) {
         <button class="modal-close" id="close">✕</button>
         <h2>Outreach — ${esc(lead.name)}</h2>
         <p class="muted mb">Personalized from this business's actual audit findings.</p>
+        <div class="flex spread mb" style="align-items:center;gap:10px">
+          <label style="margin:0">${ic('globe')} Language</label>
+          <select id="out-lang" class="flt" style="width:auto;min-width:200px">${langOptions()}</select>
+          <span id="out-lang-note" class="muted" style="font-size:12px;flex:1"></span>
+        </div>
 
         <div class="flex spread"><label>${ic('chat')} WhatsApp message ${num ? `<span class="muted">→ ${esc(lead.phoneIntl || lead.phone || '')}</span>` : '<span class="muted">(no number — you’ll pick the contact)</span>'}</label><button class="btn-ghost btn-sm" data-copy="wa">Copy</button></div>
         <textarea class="script" id="script-wa" rows="9">${esc(whatsapp)}</textarea>
@@ -2677,6 +2753,34 @@ function openOutreachModal(lead) {
   const markContacted = () => store.get(lead.placeId || lead.id).then((saved) => {
     if (saved && saved.status === 'new') store.update(saved.id, { status: 'contacted' });
   });
+
+  // Translate all three drafts into ~40 languages. Originals are kept so switching
+  // back to English is instant; RTL languages flip the textarea direction. Proper
+  // nouns (business + agency name) survive m2m100, so no placeholder gymnastics.
+  const origins = { wa: whatsapp, email, call };
+  const langSel = $('#out-lang');
+  if (langSel) langSel.onchange = async () => {
+    const lang = langSel.value;
+    const note = $('#out-lang-note');
+    const boxes = { wa: $('#script-wa'), email: $('#script-email'), call: $('#script-call') };
+    const rtl = lang !== 'en' && LANG_BY_V[lang]?.rtl;
+    Object.values(boxes).forEach((b) => { if (b) { b.dir = rtl ? 'rtl' : 'ltr'; b.style.textAlign = rtl ? 'right' : ''; } });
+    if (lang === 'en') { for (const k in boxes) if (boxes[k]) boxes[k].value = origins[k]; note.textContent = ''; return; }
+    langSel.disabled = true; note.innerHTML = '<span class="spinner"></span> Translating…';
+    const gs = getSettings();
+    const protect = [gs.agencyName, gs.agencyPhone, gs.agencyEmail, gs.agencyWebsite, lead.name];
+    try {
+      const [wa, em, cl] = await Promise.all([
+        translateText(origins.wa, lang, protect), translateText(origins.email, lang, protect), translateText(origins.call, lang, protect),
+      ]);
+      if (boxes.wa) boxes.wa.value = wa;
+      if (boxes.email) boxes.email.value = em;
+      if (boxes.call) boxes.call.value = cl;
+      note.textContent = 'Machine-translated — review before sending (names are kept as-is).';
+    } catch { note.textContent = 'Could not translate — kept English.'; }
+    finally { langSel.disabled = false; }
+  };
+
   // send whatever the user edited in the textarea
   $('#wa-send').onclick = () => {
     window.open(waLink(lead, $('#script-wa').value), '_blank');
