@@ -1003,6 +1003,7 @@ function renderUrlAudit(a, speed, heading) {
       <div class="flex mt" style="flex-wrap:wrap">
         <button class="btn-wa" id="au-wa">${ic('chat')} Send on WhatsApp</button>
         <button class="btn" id="au-email">${ic('mail')} Email${foundEmail ? ` — to ${esc(foundEmail)}` : ' (add recipient)'}</button>
+        <button class="btn-ghost btn-sm" id="au-pdf">${ic('download')} Download PDF</button>
         <button class="btn-ghost btn-sm" id="au-copy">${ic('save')} Copy as text</button>
         <button class="btn-ghost btn-sm" id="au-print">${ic('printer')} Print</button>
       </div>
@@ -1015,6 +1016,11 @@ function renderUrlAudit(a, speed, heading) {
   const msg = urlAuditMessages(a, speed, heading, bad);
 
   $('#au-print').onclick = () => window.print();
+  $('#au-pdf').onclick = (e) => downloadAuditPdf(
+    brandedAuditHtml({ title: heading, subline: a.finalUrl || a.url, score: a.websiteScore, grade: a.grade, findings }),
+    `${String(heading).replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-|-$/g, '')}-website-audit.pdf`,
+    e.currentTarget,
+  );
   $('#au-wa').onclick = () => { window.open(waLink(pseudoLead, msg.whatsapp), '_blank'); toast('Opened WhatsApp — pick the contact'); };
   $('#au-email').onclick = () => {
     window.location.href = mailtoLink(pseudoLead, msg.email);
@@ -3076,6 +3082,88 @@ function wireBoardDrop() {
 
 // -------- map (saved leads plotted; Leaflet lazy-loaded)
 let leafletLoading = null;
+// Branded PDF export. html2pdf is ~900KB, so it's lazy-loaded from CDN on the first
+// "Download PDF" click (same pattern as Leaflet) — zero cost to everyone who never
+// exports one. If it can't load, the report still has Print → Save as PDF.
+let html2pdfLoading = null;
+function loadHtml2Pdf() {
+  if (window.html2pdf) return Promise.resolve();
+  if (html2pdfLoading) return html2pdfLoading;
+  html2pdfLoading = new Promise((resolve, reject) => {
+    const js = document.createElement('script');
+    js.src = 'https://unpkg.com/html2pdf.js@0.10.2/dist/html2pdf.bundle.min.js';
+    js.onload = resolve;
+    js.onerror = reject;
+    document.head.appendChild(js);
+  });
+  return html2pdfLoading;
+}
+
+// Agency branding for the PDF header/footer, from Settings (white-label).
+function pdfBrand() {
+  const s = getSettings();
+  return {
+    name: s.agencyName || 'Your Agency',
+    tagline: s.agencyTagline || '',
+    contact: [s.agencyPhone, s.agencyEmail, s.agencyWebsite].filter(Boolean).join('  ·  '),
+  };
+}
+
+// A print-clean, white-label HTML document for one audit (light theme — a PDF lives
+// on white). Reusable for the URL audit and, later, the main report.
+function brandedAuditHtml({ title, subline, score, grade, findings, kicker = 'Website Audit' }) {
+  const b = pdfBrand();
+  const gc = grade === 'A' || grade === 'B' ? '#16a34a' : grade === 'C' ? '#d97706' : '#dc2626';
+  const sev = (f) => f.ok ? '#16a34a' : f.severity === 'critical' ? '#dc2626' : f.severity === 'warning' ? '#d97706' : '#2563eb';
+  const row = (f) => `
+    <div style="display:flex;gap:10px;padding:9px 2px;border-bottom:1px solid #edf2f7;page-break-inside:avoid">
+      <div style="color:${sev(f)};font-weight:800;flex-shrink:0;width:14px">${f.ok ? '✓' : '!'}</div>
+      <div><div style="font-size:13px;line-height:1.4">${esc(f.text)}</div>${f.pitch ? `<div style="font-size:11.5px;color:#718096;margin-top:2px;line-height:1.4">${esc(f.pitch)}</div>` : ''}</div>
+    </div>`;
+  return `
+  <div style="font-family:Arial,Helvetica,sans-serif;color:#1a202c;width:720px;background:#fff">
+    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid ${gc};padding-bottom:14px;margin-bottom:22px">
+      <div><div style="font-size:20px;font-weight:800;letter-spacing:-.3px">${esc(b.name)}</div>${b.tagline ? `<div style="font-size:12px;color:#718096">${esc(b.tagline)}</div>` : ''}</div>
+      <div style="text-align:right"><div style="font-size:10.5px;color:#a0aec0;text-transform:uppercase;letter-spacing:1px">${esc(kicker)}</div><div style="font-size:12px;color:#718096">${new Date().toLocaleDateString()}</div></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:18px">
+      <div style="max-width:460px"><div style="font-size:21px;font-weight:700;line-height:1.2">${esc(title)}</div>${subline ? `<div style="font-size:12px;color:#718096;margin-top:3px">${esc(subline)}</div>` : ''}</div>
+      <div style="text-align:center;flex-shrink:0"><div style="font-size:38px;font-weight:800;color:${gc};line-height:1">${score}</div><div style="font-size:11px;color:#718096">/100 · Grade ${esc(grade)}</div></div>
+    </div>
+    <div>${findings.map(row).join('')}</div>
+    <div style="margin-top:24px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:11.5px;color:#718096;display:flex;justify-content:space-between;gap:16px">
+      <div>Prepared by <b style="color:#1a202c">${esc(b.name)}</b></div>
+      <div style="text-align:right">${esc(b.contact)}</div>
+    </div>
+  </div>`;
+}
+
+async function downloadAuditPdf(html, filename, btn) {
+  const label = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Building PDF…'; }
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:fixed;left:-9999px;top:0;width:760px;background:#fff;padding:20px';
+  wrap.innerHTML = html;
+  document.body.appendChild(wrap);
+  try {
+    await loadHtml2Pdf();
+    await window.html2pdf().set({
+      margin: [10, 10, 12, 10],
+      filename,
+      image: { type: 'jpeg', quality: 0.96 },
+      html2canvas: { scale: 2, backgroundColor: '#ffffff', logging: false },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['css', 'legacy'] },
+    }).from(wrap.firstElementChild).save();
+    toast('PDF downloaded');
+  } catch {
+    toast('Could not build the PDF — use Print → Save as PDF instead.');
+  } finally {
+    document.body.removeChild(wrap);
+    if (btn) { btn.disabled = false; btn.innerHTML = label; }
+  }
+}
+
 function loadLeaflet() {
   if (window.L) return Promise.resolve();
   if (leafletLoading) return leafletLoading;
