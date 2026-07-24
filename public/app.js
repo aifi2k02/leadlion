@@ -1775,6 +1775,45 @@ function webAuditBlock(l) {
 }
 
 // -------- PageSpeed (real Lighthouse mobile score) block
+// Approximate local rank for the lead's own keyword. Costs 1 Google call, so it's
+// on-demand and live-only. Honest by design: the result is always labelled
+// "approximate — personalised by location" (a single point isn't a grid scan).
+function rankBlock(l) {
+  const r = l.rank;
+  const kw = esc(l.keyword || 'their service');
+  if (!r) {
+    return `
+      <div class="card mb" style="padding:14px 16px">
+        <div class="flex spread">
+          <div>
+            <b>${ic('trendUp')} Local rank check</b>
+            <div class="muted" style="font-size:13px">Where do they rank for "${kw}" near them? A number the owner feels instantly.</div>
+          </div>
+          ${isDemo()
+            ? `<button class="btn-sm" disabled title="Live accounts only — this makes a real Google call." style="opacity:.5;cursor:not-allowed">Live only</button>`
+            : `<button class="btn-sm" id="run-rank">Check rank (1 call)</button>`}
+        </div>
+      </div>`;
+  }
+  const notFound = r.rank == null;
+  const inPack = !!r.inThreePack;
+  const headline = notFound
+    ? `Not in the top ${r.scanDepth} for "${esc(r.keyword)}" — effectively invisible in local search.`
+    : inPack
+      ? `In the map 3-pack — ranked #${r.rank} for "${esc(r.keyword)}".`
+      : `Ranked #${r.rank} for "${esc(r.keyword)}" — outside the top-3 map pack.`;
+  const opp = notFound || !inPack;
+  return `
+    <div class="card mb" style="padding:14px 16px">
+      <div class="flex spread"><b>${ic('trendUp')} Local rank</b><button class="btn-ghost btn-sm" id="run-rank">↻ Re-check</button></div>
+      <div class="banner ${opp ? 'banner-warn' : 'banner-info'} mt" style="font-size:13.5px">${headline}</div>
+      ${opp
+        ? `<div class="pitch" style="margin-top:8px">${ic('dollar', 'ic-pitch')} Getting into the top 3 is where the calls are — this is the headline of the pitch.</div>`
+        : `<div class="muted" style="font-size:12.5px;margin-top:8px">They already rank well here — the angle is defending it and widening the lead.</div>`}
+      <p class="muted" style="font-size:11.5px;margin-top:8px">${ic('alertTriangle', 'ic-warning')} Approximate — Google personalises local results by the searcher's exact spot${r.biased ? ' (checked near their location)' : ' (city-wide search)'}. A grid scan would pin it exactly.</p>
+    </div>`;
+}
+
 function pageSpeedBlock(l) {
   const p = l.pageSpeed;
   if (!p) {
@@ -2329,6 +2368,7 @@ async function openLeadModal(lead) {
         ${l.website ? webAuditBlock(l) : ''}
         ${reviewBlock(l)}
         ${miningBlock(l)}
+        ${rankBlock(l)}
         ${demoSiteBlock(l)}
         ${competitorBlock(l)}
         ${isSaved ? `
@@ -2415,6 +2455,33 @@ async function openLeadModal(lead) {
         toast('Audit error: ' + e.message);
         auditBtn.disabled = false;
         auditBtn.textContent = 'Run website audit';
+      }
+    };
+  }
+
+  const rankBtn = $('#run-rank');
+  if (rankBtn) {
+    rankBtn.onclick = async () => {
+      rankBtn.disabled = true;
+      rankBtn.innerHTML = '<span class="spinner"></span> Checking…';
+      try {
+        const res = await fetch('/api/rank', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: spendBody({ keyword: l.keyword, location: l.location, lat: l.lat, lng: l.lng, placeId: l.placeId || l.id }),
+        });
+        const data = await res.json();
+        if (res.status === 402 || data.outOfCredits) { toast(data.error || 'Out of API credits.'); rankBtn.disabled = false; rankBtn.textContent = 'Check rank (1 call)'; return; }
+        if (!data.ok) throw new Error(data.error || 'Rank check failed');
+        recordUsage({ apiCalls: 1 });
+        l.rank = data;
+        if (isSaved) await store.update(l.id, { rank: data });
+        if (lastSearch?.results) { const rr = lastSearch.results.find((x) => x.placeId === (l.placeId || l.id)); if (rr) rr.rank = data; }
+        toast(data.rank == null ? `Not in the top ${data.scanDepth}` : `Ranked #${data.rank} for "${data.keyword}"`);
+        openLeadModal(l);
+      } catch (e) {
+        toast('Rank error: ' + e.message);
+        rankBtn.disabled = false;
+        rankBtn.textContent = 'Check rank (1 call)';
       }
     };
   }
