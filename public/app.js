@@ -886,17 +886,28 @@ async function viewFind() {
         <div class="muted" style="font-size:12px;margin-top:8px">The grid adapts to the city's size — big cities get more zones automatically.</div>
       </div>` : '';
   const nameMode = searchMode === 'name';
+  const urlMode = searchMode === 'url';
+  const subtitle = urlMode ? 'Audit any website — even a business that isn\'t in your pipeline.'
+    : nameMode ? 'Look up one specific business by name — audit it on the spot.'
+    : 'Search any niche in any city — every result is scored by sales opportunity.';
   $('#main').innerHTML = `
     <h1>Find Leads</h1>
-    <p class="subtitle">${nameMode
-      ? 'Look up one specific business by name — audit it on the spot.'
-      : 'Search any niche in any city — every result is scored by sales opportunity.'}</p>
+    <p class="subtitle">${subtitle}</p>
     <div id="tier-banner">${trialBanner()}</div>
     <div class="card">
       <div class="seg no-print" style="margin-bottom:14px">
-        <button class="seg-btn ${!nameMode ? 'on' : ''}" data-smode="niche">Search a niche</button>
+        <button class="seg-btn ${searchMode === 'niche' ? 'on' : ''}" data-smode="niche">Search a niche</button>
         <button class="seg-btn ${nameMode ? 'on' : ''}" data-smode="name">Find one business</button>
+        <button class="seg-btn ${urlMode ? 'on' : ''}" data-smode="url">Audit a URL</button>
       </div>
+      ${urlMode ? `
+      <div class="search-row">
+        <div class="field"><label>Website URL</label><input id="au-url" placeholder="e.g. example.com" value=""></div>
+        <div class="field"><label>Business name <span class="muted" style="font-weight:400">(optional, for the heading)</span></label><input id="au-name" placeholder="e.g. Arham Dental Clinic" value=""></div>
+        <button id="au-go">Run audit</button>
+      </div>
+      <p class="muted mt" style="font-size:12.5px">${ic('globe')} Website + mobile-speed audit only — there's no Google listing data here, so no GMB score, reviews or competitor benchmark. Use it when someone asks "can you check my site?".</p>
+      ` : `
       <div class="search-row">
         <div class="field"><label>${nameMode ? 'Business name' : 'Niche / keyword'}</label><input id="kw" placeholder="${nameMode ? 'e.g. Arham Dental Clinic' : 'e.g. plumber, dentist, roofing'}" value="${esc(lastSearch?.keyword || '')}"></div>
         <div class="field ac-field"><label>${nameMode ? 'City <span class="muted" style="font-weight:400">(narrows it to the right one)</span>' : 'Location'}</label><input id="loc" placeholder="e.g. Hyderabad, Pakistan" value="${esc(lastSearch?.location || '')}" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false"><div id="loc-ac" class="ac-menu" hidden role="listbox"></div></div>
@@ -904,18 +915,97 @@ async function viewFind() {
       </div>
       ${nameMode ? '' : depthPicker}
       ${nameMode ? `<p class="muted mt" style="font-size:12.5px">${ic('search')} One quick lookup (1 API call). Use this when a prospect gives you their name, or to re-audit a client.</p>` : ''}
+      `}
       ${isDemo() ? `<p class="muted mt" style="font-size:13px">${ic('beaker')} Demo mode — sample data only. Enter an access code (Log out → code) for live results.</p>` : ''}
     </div>
     <div id="results"></div>
   `;
-  $('#go').onclick = runSearch;
-  $('#kw').onkeydown = (e) => { if (e.key === 'Enter') runSearch(); };
   document.querySelectorAll('[data-smode]').forEach((b) => {
     b.onclick = () => { searchMode = b.dataset.smode; viewFind(); };
   });
+  if (urlMode) {
+    $('#au-go').onclick = runUrlAudit;
+    $('#au-url').onkeydown = $('#au-name').onkeydown = (e) => { if (e.key === 'Enter') runUrlAudit(); };
+    return;
+  }
+  $('#go').onclick = runSearch;
+  $('#kw').onkeydown = (e) => { if (e.key === 'Enter') runSearch(); };
   wireDepthPicker();
   wireCityAutocomplete(); // owns #loc's keydown (arrows/enter/escape), falls back to runSearch
   if (lastSearch?.results) renderResults(lastSearch);
+}
+
+// -------- Audit a URL (shortlist #10): a website + mobile-speed audit for a site
+// that isn't in the pipeline. Reuses /api/webaudit + /api/pagespeed; deliberately
+// says up front that there's no Google-listing half to this report.
+async function runUrlAudit() {
+  const url = $('#au-url').value.trim();
+  const name = $('#au-name').value.trim();
+  if (!url) return toast('Enter a website URL');
+  const btn = $('#au-go');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+  $('#results').innerHTML = '<div class="card muted">Auditing the site…</div>';
+  try {
+    const [audit, speed] = await Promise.all([
+      fetch('/api/webaudit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) }).then((r) => r.json()),
+      fetch('/api/pagespeed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) }).then((r) => r.json()).catch(() => null),
+    ]);
+    if (!audit || audit.error) throw new Error(audit?.error || 'Audit failed');
+    if (audit.reachable === false) {
+      $('#results').innerHTML = `<div class="banner banner-warn mt">${ic('alertTriangle')} Couldn't load <b>${esc(url)}</b> — the site may be down or blocking us. That itself is worth telling the owner.</div>`;
+      return;
+    }
+    recordUsage({ apiCalls: speed && speed.ok ? 1 : 0 }); // PageSpeed is the only billable call here
+    renderUrlAudit(audit, speed, name || audit.finalUrl || url);
+  } catch (e) {
+    $('#results').innerHTML = `<div class="banner banner-warn mt">${ic('alertTriangle')} ${esc(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Run audit';
+  }
+}
+
+function renderUrlAudit(a, speed, heading) {
+  const findings = (a.findings || []).map(normFinding);
+  const bad = findings.filter((f) => !f.ok);
+  const emails = a.emails || [];
+  $('#results').innerHTML = `
+    <div class="card mt">
+      <div class="flex spread">
+        <div>
+          <h2 style="margin:0">${esc(heading)}</h2>
+          <div class="muted" style="font-size:13px">${esc(a.finalUrl || a.url)} · HTTP ${a.status} · ${a.ms}ms · ${a.sizeKB}KB</div>
+        </div>
+        <div class="flex">
+          ${gradeBadge(a.grade)} <span class="stat-num" style="font-size:26px">${a.websiteScore}</span><span class="muted" style="font-size:13px">/100</span>
+        </div>
+      </div>
+      ${speed && speed.ok ? `<div class="banner ${speed.mobileScore >= 50 ? 'banner-info' : 'banner-warn'} mt" style="font-size:13px">${ic('zap')} Google mobile speed score: <b>${speed.mobileScore}/100</b>${speed.mobileScore < 50 ? ' — slow enough that Google itself flags it.' : ''}</div>` : ''}
+      ${emails.length ? `<div class="banner banner-info mt" style="font-size:13px">${ic('mail')} Contact email found on the site: <b>${emails.map(esc).join(', ')}</b></div>` : ''}
+      <h2 style="font-size:15px;margin-top:18px">Website findings — ${bad.length} to fix</h2>
+      <div>
+        ${findings.map((f) => `
+          <div class="finding">
+            <span class="icon">${f.ok ? sevIcon('ok') : sevIcon(f.severity)}</span>
+            <div><div>${esc(f.text)}</div>
+            ${f.pitch ? `<div class="pitch">${ic('dollar','ic-pitch')} ${esc(f.pitch)}</div>` : ''}</div>
+          </div>`).join('')}
+      </div>
+      <div class="flex mt">
+        <button class="btn-ghost btn-sm" id="au-copy">${ic('save')} Copy as text</button>
+        <button class="btn-ghost btn-sm" id="au-print">${ic('printer')} Print</button>
+      </div>
+    </div>`;
+  $('#au-print').onclick = () => window.print();
+  $('#au-copy').onclick = () => {
+    const lines = [`WEBSITE AUDIT — ${heading}`, `${a.finalUrl || a.url}`, `Score ${a.websiteScore}/100 (Grade ${a.grade})`];
+    if (speed?.ok) lines.push(`Google mobile speed: ${speed.mobileScore}/100`);
+    lines.push('');
+    bad.forEach((f) => { lines.push(`- ${f.text}`); if (f.pitch) lines.push(`    ${f.pitch}`); });
+    navigator.clipboard.writeText(lines.join('\n'));
+    toast('Audit copied');
+  };
 }
 
 // City autocomplete on the Location box. Suggestions come from Google Places
