@@ -3435,19 +3435,28 @@ async function viewFixPlan(id) {
   $('#fp-copy').onclick = () => { navigator.clipboard.writeText(fixPlanText(lead)); toast('Fix plan copied — paste into your task tool'); };
 }
 
-async function viewReport(id) {
+async function viewReport(id, lang = 'en') {
   const lead = await store.get(decodeURIComponent(id || ''));
   if (!lead) { $('#main').innerHTML = '<div class="card">Lead not found. <a href="#/leads" style="color:var(--accent)">Back to leads</a></div>'; return; }
   const s = getSettings();
   const ringColor = lead.healthScore >= 70 ? '#34d399' : lead.healthScore >= 45 ? '#fbbf24' : '#f87171';
   const critical = lead.issues.filter((i) => i.severity === 'critical');
   const other = lead.issues.filter((i) => i.severity !== 'critical');
+  // T() marks a string as translatable. Only .tr nodes are ever translated, so
+  // verbatim customer quotes, the business name, numbers and icons — none of which
+  // are wrapped — are never touched. Each .tr is a whole string, so no sentence
+  // fragmentation either.
+  const T = (str) => `<span class="tr">${esc(str)}</span>`;
 
   $('#main').innerHTML = `
-    <div class="flex spread mb no-print">
+    <div class="flex spread mb no-print" style="flex-wrap:wrap;gap:10px">
       <a class="btn-ghost btn-sm" href="#/leads">← Back</a>
-      ${feat().download ? `<button onclick="window.print()">${ic('printer')} Print / Save as PDF</button>` : ''}
+      <div class="flex" style="gap:10px;align-items:center">
+        <select id="report-lang" class="flt" style="width:auto;min-width:180px" title="Translate the report (machine translation)">${langOptions(lang === 'en' ? '' : lang)}</select>
+        ${feat().download ? `<button onclick="window.print()">${ic('printer')} Print / Save as PDF</button>` : ''}
+      </div>
     </div>
+    <div id="report-lang-note" class="muted no-print" style="font-size:12px;margin:-6px 0 10px"></div>
     <div class="card mb no-print" id="share-panel"><p class="muted">Loading share options…</p></div>
     <div class="report-page">
       <div class="report-head">
@@ -3456,9 +3465,9 @@ async function viewReport(id) {
           ${esc(s.agencyEmail || '')}<br>${esc(s.agencyPhone || '')}<br>${esc(s.agencyWebsite || '')}
         </div>
       </div>
-      <h1 style="font-size:26px">Google Business Profile Audit</h1>
+      <h1 style="font-size:26px">${T('Google Business Profile Audit')}</h1>
       <p style="color:#4a5568">${esc(lead.name)} · ${esc(lead.address)}</p>
-      <p style="color:#718096;font-size:13px">Prepared ${new Date(lead.savedAt || lead.createdAt || Date.now()).toLocaleDateString()} · Searched as "${esc(lead.keyword)}" in ${esc(lead.location)}</p>
+      <p style="color:#718096;font-size:13px"><span class="tr">Prepared</span> ${new Date(lead.savedAt || lead.createdAt || Date.now()).toLocaleDateString()} · <span class="tr">Searched as</span> "${esc(lead.keyword)}" <span class="tr">in</span> ${esc(lead.location)}</p>
 
       <div class="report-grade">
         <div class="report-score-ring" style="background:conic-gradient(${ringColor} ${lead.healthScore * 3.6}deg, #e2e8f0 0deg)">
@@ -3466,106 +3475,127 @@ async function viewReport(id) {
             <div>${lead.healthScore}</div><div style="font-size:11px;font-weight:500;color:#718096">/ 100</div>
           </div>
         </div>
-        <div class="label">Listing Health Score — Grade <b>${lead.grade}</b></div>
+        <div class="label">${T('Listing Health Score — Grade')} <b>${lead.grade}</b></div>
       </div>
 
       <div class="report-section">
-        <h2>Snapshot</h2>
+        <h2>${T('Snapshot')}</h2>
         <div class="report-meta-grid">
-          <span class="k">Star rating</span><span>${lead.rating ? lead.rating + ' ★' : 'No rating'}</span>
-          <span class="k">Reviews</span><span>${lead.reviewCount ?? 0}</span>
-          <span class="k">Website</span><span>${lead.website ? 'Yes' : ic('x','ic-critical') + ' Missing'}</span>
-          <span class="k">Phone</span><span>${lead.phone || (ic('x','ic-critical') + ' Missing')}</span>
-          <span class="k">Photos</span><span>${lead.photoCount ?? 0}</span>
-          <span class="k">Hours listed</span><span>${lead.hasHours ? 'Yes' : ic('x','ic-critical') + ' Missing'}</span>
+          <span class="k">${T('Star rating')}</span><span>${lead.rating ? lead.rating + ' ★' : T('No rating')}</span>
+          <span class="k">${T('Reviews')}</span><span>${lead.reviewCount ?? 0}</span>
+          <span class="k">${T('Website')}</span><span>${lead.website ? T('Yes') : ic('x','ic-critical') + ' ' + T('Missing')}</span>
+          <span class="k">${T('Phone')}</span><span>${lead.phone || (ic('x','ic-critical') + ' ' + T('Missing'))}</span>
+          <span class="k">${T('Photos')}</span><span>${lead.photoCount ?? 0}</span>
+          <span class="k">${T('Hours listed')}</span><span>${lead.hasHours ? T('Yes') : ic('x','ic-critical') + ' ' + T('Missing')}</span>
         </div>
       </div>
 
-      ${critical.length ? `<div class="report-section"><h2>${sevIcon('critical')} Critical issues (${critical.length})</h2>
-        ${critical.map((i) => `<div class="report-finding"><span>${sevIcon('critical')}</span><div><b>${esc(i.text)}</b>${i.pitch ? `<div class="pitch">${esc(i.pitch)}</div>` : ''}</div></div>`).join('')}</div>` : ''}
+      ${critical.length ? `<div class="report-section"><h2>${sevIcon('critical')} ${T('Critical issues')} (${critical.length})</h2>
+        ${critical.map((i) => `<div class="report-finding"><span>${sevIcon('critical')}</span><div><b>${T(i.text)}</b>${i.pitch ? `<div class="pitch">${T(i.pitch)}</div>` : ''}</div></div>`).join('')}</div>` : ''}
 
-      ${other.length ? `<div class="report-section"><h2>${sevIcon('warning')} Improvement opportunities (${other.length})</h2>
-        ${other.map((i) => `<div class="report-finding"><span>${sevIcon('warning')}</span><div><b>${esc(i.text)}</b>${i.pitch ? `<div class="pitch">${esc(i.pitch)}</div>` : ''}</div></div>`).join('')}</div>` : ''}
+      ${other.length ? `<div class="report-section"><h2>${sevIcon('warning')} ${T('Improvement opportunities')} (${other.length})</h2>
+        ${other.map((i) => `<div class="report-finding"><span>${sevIcon('warning')}</span><div><b>${T(i.text)}</b>${i.pitch ? `<div class="pitch">${T(i.pitch)}</div>` : ''}</div></div>`).join('')}</div>` : ''}
 
-      <div class="report-section"><h2>${sevIcon('ok')} What's working</h2>
-        ${lead.findings.filter((f) => f.ok).map((f) => `<div class="report-finding"><span>${sevIcon('ok')}</span><div>${esc(f.text)}</div></div>`).join('')}
+      <div class="report-section"><h2>${sevIcon('ok')} ${T("What's working")}</h2>
+        ${lead.findings.filter((f) => f.ok).map((f) => `<div class="report-finding"><span>${sevIcon('ok')}</span><div>${T(f.text)}</div></div>`).join('')}
       </div>
 
       ${lead.reviewInsight ? `
       <div class="report-section">
-        <h2>${ic('star','ic-pitch')} Review Intelligence</h2>
-        <p style="color:#4a5568;font-size:14px"><b>${esc(lead.reviewInsight.clientHeadline || lead.reviewInsight.headline)}</b></p>
-        <div class="report-finding" style="margin-top:8px"><span>${ic('dollar','ic-pitch')}</span><div>${esc(lead.reviewInsight.clientPitch || lead.reviewInsight.pitch)}</div></div>
-        ${lead.reviewInsight.toTarget ? `<div class="report-finding"><span>${ic('trendUp','ic-info')}</span><div><b>${lead.reviewInsight.toTarget.needed}</b> new 5-star reviews would lift the average to ${lead.reviewInsight.toTarget.target}★.</div></div>` : ''}
-        <p style="color:#94a3b8;font-size:12px;margin-top:8px">Estimated from the public ${lead.reviewInsight.rating}★ average across ${lead.reviewInsight.count} reviews.</p>
+        <h2>${ic('star','ic-pitch')} ${T('Review Intelligence')}</h2>
+        <p style="color:#4a5568;font-size:14px"><b>${T(lead.reviewInsight.clientHeadline || lead.reviewInsight.headline)}</b></p>
+        <div class="report-finding" style="margin-top:8px"><span>${ic('dollar','ic-pitch')}</span><div>${T(lead.reviewInsight.clientPitch || lead.reviewInsight.pitch)}</div></div>
+        ${lead.reviewInsight.toTarget ? `<div class="report-finding"><span>${ic('trendUp','ic-info')}</span><div><b>${lead.reviewInsight.toTarget.needed}</b> ${T('new 5-star reviews would lift the average to')} ${lead.reviewInsight.toTarget.target}★.</div></div>` : ''}
+        <p style="color:#94a3b8;font-size:12px;margin-top:8px"><span class="tr">Estimated from the public</span> ${lead.reviewInsight.rating}★ <span class="tr">average across</span> ${lead.reviewInsight.count} <span class="tr">reviews.</span></p>
       </div>` : ''}
 
       ${(() => {
         const cm = clientMining(lead.reviewMining);
         if (!cm || !cm.themes.length) return '';
         const row = (t) => `<div class="report-finding"><span>${t.sentiment === 'praise' ? ic('heart','ic-praise') : sevIcon('critical')}</span><div>
-          <b>${esc(t.label)}</b>
+          <b>${T(t.label)}</b>
           ${t.quote ? `<blockquote class="review-quote">“${esc(t.quote)}”<cite>— ${esc(t.quoteAuthor || 'a customer')}${t.quoteRating ? `, ${t.quoteRating}★` : ''}</cite></blockquote>` : ''}
         </div></div>`;
         return `
         <div class="report-section">
-          <h2>${ic('megaphone')} What your customers are saying</h2>
-          <p style="color:#4a5568;font-size:14px">${esc(cm.clientSummary)}</p>
+          <h2>${ic('megaphone')} ${T('What your customers are saying')}</h2>
+          <p style="color:#4a5568;font-size:14px">${T(cm.clientSummary)}</p>
           <div style="margin-top:8px">${cm.themes.map(row).join('')}</div>
-          <p style="color:#94a3b8;font-size:12px;margin-top:8px">Based on the ${cm.sampled} review${cm.sampled === 1 ? '' : 's'} Google displays publicly${cm.totalReviews ? ` of ${cm.totalReviews} total` : ''}. Quotes are reproduced verbatim.</p>
+          <p style="color:#94a3b8;font-size:12px;margin-top:8px"><span class="tr">Based on the</span> ${cm.sampled} <span class="tr">review${cm.sampled === 1 ? '' : 's'} Google displays publicly</span>${cm.totalReviews ? ` <span class="tr">of</span> ${cm.totalReviews} <span class="tr">total</span>` : ''}. <span class="tr">Quotes are reproduced verbatim.</span></p>
         </div>`;
       })()}
 
       ${lead.webAudit ? `
       <div class="report-section">
-        <h2>${ic('globe')} Website audit — Grade ${lead.webAudit.grade} (${lead.webAudit.websiteScore}/100)</h2>
+        <h2>${ic('globe')} ${T('Website audit — Grade')} ${lead.webAudit.grade} (${lead.webAudit.websiteScore}/100)</h2>
         ${lead.webAudit.reachable === false
-          ? `<div class="report-finding"><span>${sevIcon('critical')}</span><div><b>${esc(lead.webAudit.findings[0].text)}</b><div class="pitch">${esc(lead.webAudit.findings[0].pitch)}</div></div></div>`
+          ? `<div class="report-finding"><span>${sevIcon('critical')}</span><div><b>${T(lead.webAudit.findings[0].text)}</b><div class="pitch">${T(lead.webAudit.findings[0].pitch)}</div></div></div>`
           : `
-            ${lead.webAudit.issues.map((i) => `<div class="report-finding"><span>${sevIcon(i.severity)}</span><div><b>${esc(i.text)}</b>${i.pitch ? `<div class="pitch">${esc(i.pitch)}</div>` : ''}</div></div>`).join('')}
-            ${lead.webAudit.findings.filter((f) => f.ok).map((f) => `<div class="report-finding"><span>${sevIcon('ok')}</span><div>${esc(f.text)}</div></div>`).join('')}
+            ${lead.webAudit.issues.map((i) => `<div class="report-finding"><span>${sevIcon(i.severity)}</span><div><b>${T(i.text)}</b>${i.pitch ? `<div class="pitch">${T(i.pitch)}</div>` : ''}</div></div>`).join('')}
+            ${lead.webAudit.findings.filter((f) => f.ok).map((f) => `<div class="report-finding"><span>${sevIcon('ok')}</span><div>${T(f.text)}</div></div>`).join('')}
           `}
       </div>` : ''}
 
       ${lead.pageSpeed?.ok ? `
       <div class="report-section">
-        <h2>${ic('zap')} Mobile Speed — ${lead.pageSpeed.score}/100 (Grade ${lead.pageSpeed.grade})</h2>
+        <h2>${ic('zap')} ${T('Mobile Speed')} — ${lead.pageSpeed.score}/100 (Grade ${lead.pageSpeed.grade})</h2>
         <div class="report-meta-grid">
-          ${lead.pageSpeed.metrics.lcp?.value ? `<span class="k">Largest Contentful Paint</span><span>${esc(lead.pageSpeed.metrics.lcp.value)}</span>` : ''}
-          ${lead.pageSpeed.metrics.si?.value ? `<span class="k">Speed Index</span><span>${esc(lead.pageSpeed.metrics.si.value)}</span>` : ''}
-          ${lead.pageSpeed.metrics.tbt?.value ? `<span class="k">Total Blocking Time</span><span>${esc(lead.pageSpeed.metrics.tbt.value)}</span>` : ''}
-          ${lead.pageSpeed.metrics.cls?.value ? `<span class="k">Cumulative Layout Shift</span><span>${esc(lead.pageSpeed.metrics.cls.value)}</span>` : ''}
+          ${lead.pageSpeed.metrics.lcp?.value ? `<span class="k">${T('Largest Contentful Paint')}</span><span>${esc(lead.pageSpeed.metrics.lcp.value)}</span>` : ''}
+          ${lead.pageSpeed.metrics.si?.value ? `<span class="k">${T('Speed Index')}</span><span>${esc(lead.pageSpeed.metrics.si.value)}</span>` : ''}
+          ${lead.pageSpeed.metrics.tbt?.value ? `<span class="k">${T('Total Blocking Time')}</span><span>${esc(lead.pageSpeed.metrics.tbt.value)}</span>` : ''}
+          ${lead.pageSpeed.metrics.cls?.value ? `<span class="k">${T('Cumulative Layout Shift')}</span><span>${esc(lead.pageSpeed.metrics.cls.value)}</span>` : ''}
         </div>
-        ${!lead.pageSpeed.finding.ok ? `<div class="report-finding" style="margin-top:10px"><span>${sevIcon(lead.pageSpeed.finding.severity)}</span><div><b>${esc(lead.pageSpeed.finding.text)}</b><div class="pitch">${esc(lead.pageSpeed.finding.pitch)}</div></div></div>` : ''}
+        ${!lead.pageSpeed.finding.ok ? `<div class="report-finding" style="margin-top:10px"><span>${sevIcon(lead.pageSpeed.finding.severity)}</span><div><b>${T(lead.pageSpeed.finding.text)}</b><div class="pitch">${T(lead.pageSpeed.finding.pitch)}</div></div></div>` : ''}
       </div>` : ''}
 
       ${lead.competitors?.marketSize ? `
       <div class="report-section">
-        <h2>${ic('barChart')} Competitor Benchmark</h2>
-        <p style="color:#4a5568;font-size:14px">Ranked <b>#${lead.competitors.rankByReviews}</b> of ${lead.competitors.marketSize} by review volume for "${esc(lead.keyword)}" in ${esc(lead.location)}. Here's how you compare to the typical competitor:</p>
+        <h2>${ic('barChart')} ${T('Competitor Benchmark')}</h2>
+        <p style="color:#4a5568;font-size:14px"><span class="tr">Ranked</span> <b>#${lead.competitors.rankByReviews}</b> <span class="tr">of</span> ${lead.competitors.marketSize} <span class="tr">by review volume for</span> "${esc(lead.keyword)}" <span class="tr">in</span> ${esc(lead.location)}. <span class="tr">Here's how you compare to the typical competitor:</span></p>
         <div class="report-meta-grid" style="margin-top:10px">
-          <span class="k">Reviews</span><span>${lead.reviewCount ?? 0} <span style="color:#718096">${lead.competitors.reviewTarget ? `· ~${lead.competitors.reviewTarget.needed} more to pass ${lead.competitors.reviewTarget.passN} competitor${lead.competitors.reviewTarget.passN === 1 ? '' : 's'}` : `vs ${lead.competitors.medReviews} typical`}</span></span>
-          <span class="k">Rating</span><span>${lead.rating || 0}★ <span style="color:#718096">vs ${lead.competitors.medRating}★ typical</span></span>
-          <span class="k">Photos</span><span>${lead.photoCount ?? 0} <span style="color:#718096">vs ${lead.competitors.medPhotos} typical</span></span>
-          <span class="k">Website</span><span>${lead.website ? 'Yes' : 'No'} <span style="color:#718096">· ${lead.competitors.pctWebsite}% of competitors have one</span></span>
+          <span class="k">${T('Reviews')}</span><span>${lead.reviewCount ?? 0} <span style="color:#718096">${lead.competitors.reviewTarget ? `· ~${lead.competitors.reviewTarget.needed} ${T('more to pass')} ${lead.competitors.reviewTarget.passN} ${T(lead.competitors.reviewTarget.passN === 1 ? 'competitor' : 'competitors')}` : `${T('vs')} ${lead.competitors.medReviews} ${T('typical')}`}</span></span>
+          <span class="k">${T('Rating')}</span><span>${lead.rating || 0}★ <span style="color:#718096">${T('vs')} ${lead.competitors.medRating}★ ${T('typical')}</span></span>
+          <span class="k">${T('Photos')}</span><span>${lead.photoCount ?? 0} <span style="color:#718096">${T('vs')} ${lead.competitors.medPhotos} ${T('typical')}</span></span>
+          <span class="k">${T('Website')}</span><span>${lead.website ? T('Yes') : T('No')} <span style="color:#718096">· ${lead.competitors.pctWebsite}% ${T('of competitors have one')}</span></span>
         </div>
       </div>` : ''}
 
       ${lead.demoSiteId ? `
       <div class="report-section">
-        <h2>${ic('globe')} Your new website — ready to preview</h2>
-        <p style="color:#4a5568;font-size:14px">We've already built a preview of a modern website for ${esc(lead.name)}. Take a look:</p>
+        <h2>${ic('globe')} ${T('Your new website — ready to preview')}</h2>
+        <p style="color:#4a5568;font-size:14px"><span class="tr">We've already built a preview of a modern website for</span> ${esc(lead.name)}. <span class="tr">Take a look:</span></p>
         <p style="margin-top:8px"><a href="${esc(demoSiteUrl(lead))}" style="color:#146682;font-weight:700;word-break:break-all">${esc(demoSiteUrl(lead))}</a></p>
-        <p style="color:#94a3b8;font-size:12px;margin-top:6px">A live preview — click to open it in your browser.</p>
+        <p style="color:#94a3b8;font-size:12px;margin-top:6px">${T('A live preview — click to open it in your browser.')}</p>
       </div>` : ''}
 
       <div class="report-cta">
-        <h3>Recommended next steps</h3>
-        <p style="font-size:14px;color:#4a5568">${esc(ctaCopy(lead, s.agencyName))}</p>
-        <p style="font-size:14px;margin-top:8px"><b>Contact:</b> ${esc(s.agencyEmail || 'your@email.com')} ${s.agencyPhone ? '· ' + esc(s.agencyPhone) : ''}</p>
+        <h3>${T('Recommended next steps')}</h3>
+        <p style="font-size:14px;color:#4a5568">${T(ctaCopy(lead, s.agencyName))}</p>
+        <p style="font-size:14px;margin-top:8px"><b>${T('Contact:')}</b> ${esc(s.agencyEmail || 'your@email.com')} ${s.agencyPhone ? '· ' + esc(s.agencyPhone) : ''}</p>
       </div>
     </div>
   `;
+
+  // Translate the report: every translatable string is a `.tr` node, so we swap
+  // just those — verbatim customer quotes, the business name, numbers and icons are
+  // never `.tr`, so they're untouched. Re-selecting the language re-renders English
+  // then re-translates (keeps it simple + correct). The Print/Save-as-PDF output
+  // carries whatever is on screen, so the PDF is translated too.
+  const langSelR = $('#report-lang');
+  const langNote = $('#report-lang-note');
+  if (langSelR) langSelR.onchange = () => viewReport(id, langSelR.value);
+  if (lang && lang !== 'en') {
+    const rp = $('.report-page');
+    if (rp && LANG_BY_V[lang]?.rtl) rp.dir = 'rtl';
+    if (langNote) langNote.innerHTML = '<span class="spinner"></span> Translating the report…';
+    const nodes = rp ? [...rp.querySelectorAll('.tr')] : [];
+    for (let i = 0; i < nodes.length; i += 40) {
+      const chunk = nodes.slice(i, i + 40);
+      const tr = await translateStrings(chunk.map((n) => n.textContent), lang);
+      tr.forEach((t, k) => { if (chunk[k] && t) chunk[k].textContent = t; });
+    }
+    if (langNote) langNote.textContent = 'Machine-translated — review before sending. Names, numbers and customer quotes are kept exactly as-is.';
+  }
   renderSharePanel(lead);
 }
 
