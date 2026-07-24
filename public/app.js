@@ -967,7 +967,12 @@ async function runUrlAudit() {
 }
 
 function renderUrlAudit(a, speed, heading) {
-  const findings = (a.findings || []).map(normFinding);
+  // PageSpeed returns its own sales finding (text + pitch) — fold it in with the
+  // website findings, the same way allIssues() does for a saved lead.
+  const findings = [
+    ...(a.findings || []).map(normFinding),
+    ...(speed?.ok && speed.finding ? [speed.finding] : []),
+  ];
   const bad = findings.filter((f) => !f.ok);
   const emails = a.emails || [];
   $('#results').innerHTML = `
@@ -981,7 +986,9 @@ function renderUrlAudit(a, speed, heading) {
           ${gradeBadge(a.grade)} <span class="stat-num" style="font-size:26px">${a.websiteScore}</span><span class="muted" style="font-size:13px">/100</span>
         </div>
       </div>
-      ${speed && speed.ok ? `<div class="banner ${speed.mobileScore >= 50 ? 'banner-info' : 'banner-warn'} mt" style="font-size:13px">${ic('zap')} Google mobile speed score: <b>${speed.mobileScore}/100</b>${speed.mobileScore < 50 ? ' — slow enough that Google itself flags it.' : ''}</div>` : ''}
+      ${speed && speed.ok
+        ? `<div class="banner ${speed.score >= 50 ? 'banner-info' : 'banner-warn'} mt" style="font-size:13px">${ic('zap')} Google mobile speed: <b>${speed.score}/100</b> (Grade ${esc(speed.grade)})${speed.score < 50 ? ' — slow enough that Google itself flags it.' : ''}</div>`
+        : `<div class="banner banner-warn mt" style="font-size:13px">${ic('alertTriangle')} Mobile speed test unavailable${speed?.error ? `: ${esc(speed.error)}` : ''}.</div>`}
       ${emails.length ? `<div class="banner banner-info mt" style="font-size:13px">${ic('mail')} Contact email found on the site: <b>${emails.map(esc).join(', ')}</b></div>` : ''}
       <h2 style="font-size:15px;margin-top:18px">Website findings — ${bad.length} to fix</h2>
       <div>
@@ -1000,7 +1007,7 @@ function renderUrlAudit(a, speed, heading) {
   $('#au-print').onclick = () => window.print();
   $('#au-copy').onclick = () => {
     const lines = [`WEBSITE AUDIT — ${heading}`, `${a.finalUrl || a.url}`, `Score ${a.websiteScore}/100 (Grade ${a.grade})`];
-    if (speed?.ok) lines.push(`Google mobile speed: ${speed.mobileScore}/100`);
+    if (speed?.ok) lines.push(`Google mobile speed: ${speed.score}/100 (Grade ${speed.grade})`);
     lines.push('');
     bad.forEach((f) => { lines.push(`- ${f.text}`); if (f.pitch) lines.push(`    ${f.pitch}`); });
     navigator.clipboard.writeText(lines.join('\n'));
