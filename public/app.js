@@ -718,6 +718,10 @@ const routes = {
 };
 
 let lastSearch = null; // cache results between navigations
+// 'niche' = the usual keyword+city sweep. 'name' = look up ONE named business
+// (Places text search is business-first, so the same endpoint handles it — a name
+// lookup is always a 1-page quick search, never a deep sweep).
+let searchMode = 'niche';
 
 async function render() {
   $('#modal-root').innerHTML = ''; // close any open modal on navigation
@@ -881,23 +885,34 @@ async function viewFind() {
         </div>
         <div class="muted" style="font-size:12px;margin-top:8px">The grid adapts to the city's size — big cities get more zones automatically.</div>
       </div>` : '';
+  const nameMode = searchMode === 'name';
   $('#main').innerHTML = `
     <h1>Find Leads</h1>
-    <p class="subtitle">Search any niche in any city — every result is scored by sales opportunity.</p>
+    <p class="subtitle">${nameMode
+      ? 'Look up one specific business by name — audit it on the spot.'
+      : 'Search any niche in any city — every result is scored by sales opportunity.'}</p>
     <div id="tier-banner">${trialBanner()}</div>
     <div class="card">
-      <div class="search-row">
-        <div class="field"><label>Niche / keyword</label><input id="kw" placeholder="e.g. plumber, dentist, roofing" value="${esc(lastSearch?.keyword || '')}"></div>
-        <div class="field ac-field"><label>Location</label><input id="loc" placeholder="e.g. Hyderabad, Pakistan" value="${esc(lastSearch?.location || '')}" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false"><div id="loc-ac" class="ac-menu" hidden role="listbox"></div></div>
-        <button id="go">Search</button>
+      <div class="seg no-print" style="margin-bottom:14px">
+        <button class="seg-btn ${!nameMode ? 'on' : ''}" data-smode="niche">Search a niche</button>
+        <button class="seg-btn ${nameMode ? 'on' : ''}" data-smode="name">Find one business</button>
       </div>
-      ${depthPicker}
+      <div class="search-row">
+        <div class="field"><label>${nameMode ? 'Business name' : 'Niche / keyword'}</label><input id="kw" placeholder="${nameMode ? 'e.g. Arham Dental Clinic' : 'e.g. plumber, dentist, roofing'}" value="${esc(lastSearch?.keyword || '')}"></div>
+        <div class="field ac-field"><label>${nameMode ? 'City <span class="muted" style="font-weight:400">(narrows it to the right one)</span>' : 'Location'}</label><input id="loc" placeholder="e.g. Hyderabad, Pakistan" value="${esc(lastSearch?.location || '')}" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false"><div id="loc-ac" class="ac-menu" hidden role="listbox"></div></div>
+        <button id="go">${nameMode ? 'Find' : 'Search'}</button>
+      </div>
+      ${nameMode ? '' : depthPicker}
+      ${nameMode ? `<p class="muted mt" style="font-size:12.5px">${ic('search')} One quick lookup (1 API call). Use this when a prospect gives you their name, or to re-audit a client.</p>` : ''}
       ${isDemo() ? `<p class="muted mt" style="font-size:13px">${ic('beaker')} Demo mode — sample data only. Enter an access code (Log out → code) for live results.</p>` : ''}
     </div>
     <div id="results"></div>
   `;
   $('#go').onclick = runSearch;
   $('#kw').onkeydown = (e) => { if (e.key === 'Enter') runSearch(); };
+  document.querySelectorAll('[data-smode]').forEach((b) => {
+    b.onclick = () => { searchMode = b.dataset.smode; viewFind(); };
+  });
   wireDepthPicker();
   wireCityAutocomplete(); // owns #loc's keydown (arrows/enter/escape), falls back to runSearch
   if (lastSearch?.results) renderResults(lastSearch);
@@ -1172,7 +1187,8 @@ async function runSearch() {
   const keyword = $('#kw').value.trim();
   const location = $('#loc').value.trim();
   if (!keyword || !location) return toast('Enter both a keyword and a location');
-  const depth = feat().deep ? ($('#depth')?.value || 'quick') : 'fast';
+  // A named-business lookup is always one quick page — never a deep sweep.
+  const depth = searchMode === 'name' ? 'quick' : (feat().deep ? ($('#depth')?.value || 'quick') : 'fast');
   // Exhaustive is the single most expensive action in the app (hundreds–1,000+
   // Google calls). It's the only search that gets a spend warning up front —
   // the city size isn't known until /api/plan, so the range is deliberately broad.
@@ -1201,7 +1217,7 @@ async function runSearch() {
       }
       attachCompetitorStats(data.results);
       if (data.mode === 'live') recordUsage({ searches: 1, apiCalls: data.apiCalls || 0 });
-      lastSearch = { keyword, location, mode: data.mode, deep: false, depth, results: data.results, filters: {} };
+      lastSearch = { keyword, location, mode: data.mode, deep: false, depth, nameMode: searchMode === 'name', results: data.results, filters: {} };
       return renderResults(lastSearch);
     }
 
@@ -1387,7 +1403,24 @@ async function auditAllWebsites(search, btn) {
 }
 
 function renderResults(search) {
-  const shown = applyFilters(search).sort((a, b) => combinedOpp(b) - combinedOpp(a));
+  // Niche sweeps rank by opportunity. A named-business lookup ranks by how closely
+  // the name matches what you typed — you want the business you asked for at the
+  // top, not whichever nearby match has the worst listing.
+  const nameScore = (r) => {
+    const n = normKey(r.name), q = normKey(search.keyword);
+    if (!q) return 0;
+    if (n === q) return 100;
+    if (n.startsWith(q)) return 90;
+    if (n.includes(q)) return 80;
+    // Otherwise score on how many of the typed words appear, so a near-miss like
+    // "Arham Dental Care" still outranks an unrelated "Some Other Clinic".
+    const words = q.split(/\s+/).filter(Boolean);
+    const hits = words.filter((w) => n.includes(w)).length;
+    return words.length ? Math.round((hits / words.length) * 70) : 0;
+  };
+  const shown = applyFilters(search).sort(search.nameMode
+    ? (a, b) => (nameScore(b) - nameScore(a)) || (combinedOpp(b) - combinedOpp(a))
+    : (a, b) => combinedOpp(b) - combinedOpp(a));
   const saved = new Set(store.local().map((l) => l.id));
   const auditable = search.results.filter((r) => r.website && !r.webAudit).length;
   const audited = search.results.filter((r) => r.webAudit).length;
